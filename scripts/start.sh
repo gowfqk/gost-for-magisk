@@ -38,20 +38,143 @@ if [ ! -f "$CONFIG" ]; then
     exit 1
 fi
 
+# ---- Parse config and build gost command line ----
+# Helper: extract JSON value (simple, handles top-level string/number/bool)
+jval() {
+    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+}
+
+# Helper: extract nested JSON value from a section
+# Usage: jsection_val "auth" "enabled"
+jsection_val() {
+    _section="$1" _key="$2"
+    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+}
+
+PROXY_TYPE=$(jval proxy_type)
+[ -z "$PROXY_TYPE" ] && PROXY_TYPE="http"
+
+LISTEN_ADDR=$(jval listen_addr)
+[ -z "$LISTEN_ADDR" ] && LISTEN_ADDR="0.0.0.0"
+
+LISTEN_PORT=$(jval listen_port)
+[ -z "$LISTEN_PORT" ] && LISTEN_PORT="1080"
+
+log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT"
+
+# ---- Build the -L (listen) argument ----
+AUTH_ENABLED=$(jsection_val auth enabled)
+AUTH_USER=$(jsection_val auth username)
+AUTH_PASS=$(jsection_val auth password)
+
+AUTH_PART=""
+if [ "$AUTH_ENABLED" = "true" ] && [ -n "$AUTH_USER" ]; then
+    AUTH_PART="${AUTH_USER}:${AUTH_PASS}@"
+fi
+
+# Map proxy_type to gost scheme
+case "$PROXY_TYPE" in
+    http|socks5|socks4|relay)
+        SCHEME="$PROXY_TYPE"
+        ;;
+    ss|shadowsocks)
+        SCHEME="ss"
+        SS_METHOD=$(jsection_val shadowsocks method)
+        [ -z "$SS_METHOD" ] && SS_METHOD="aes-256-cfb"
+        SS_PASS=$(jsection_val shadowsocks password)
+        # ss://method:password@addr:port
+        LISTEN_URL="${SCHEME}://${SS_METHOD}:${SS_PASS}@${LISTEN_ADDR}:${LISTEN_PORT}"
+        ;;
+    *)
+        SCHEME="http"
+        ;;
+esac
+
+# For non-ss types, build the URL
+if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
+    # Check for TLS
+    TLS_CERT=$(jsection_val tls cert)
+    if [ -n "$TLS_CERT" ]; then
+        SCHEME="${SCHEME}+tls"
+    fi
+
+    # Check for WebSocket
+    WS_PATH=$(jsection_val websocket path)
+    if [ -n "$WS_PATH" ]; then
+        SCHEME="${SCHEME}+ws"
+    fi
+
+    LISTEN_URL="${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${LISTEN_PORT}"
+
+    # Append WebSocket query params
+    if [ -n "$WS_PATH" ]; then
+        WS_HOST=$(jsection_val websocket host)
+        QUERY="?path=${WS_PATH}"
+        [ -n "$WS_HOST" ] && QUERY="${QUERY}&host=${WS_HOST}"
+        LISTEN_URL="${LISTEN_URL}${QUERY}"
+    fi
+fi
+
+log_msg "Listen URL: $LISTEN_URL"
+
+# ---- Build the -F (forward/upstream) argument ----
+UPSTREAM_ENABLED=$(jsection_val upstream enabled)
+FORWARD_ARG=""
+
+if [ "$UPSTREAM_ENABLED" = "true" ]; then
+    UP_TYPE=$(jsection_val upstream type)
+    [ -z "$UP_TYPE" ] && UP_TYPE="http"
+    UP_ADDR=$(jsection_val upstream addr)
+    UP_PORT=$(jsection_val upstream port)
+    UP_USER=$(jsection_val upstream username)
+    UP_PASS=$(jsection_val upstream password)
+
+    if [ -n "$UP_ADDR" ] && [ -n "$UP_PORT" ]; then
+        UP_AUTH=""
+        if [ -n "$UP_USER" ]; then
+            UP_AUTH="${UP_USER}:${UP_PASS}@"
+        fi
+
+        # Check upstream TLS/WS
+        UP_SCHEME="$UP_TYPE"
+        UP_WS_PATH=$(jsection_val upstream ws_path)
+        [ -n "$UP_WS_PATH" ] && UP_SCHEME="${UP_SCHEME}+ws"
+
+        FORWARD_URL="${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
+
+        # Append WS params
+        if [ -n "$UP_WS_PATH" ]; then
+            UP_WS_HOST=$(jsection_val upstream ws_host)
+            UP_QUERY="?path=${UP_WS_PATH}"
+            [ -n "$UP_WS_HOST" ] && UP_QUERY="${UP_QUERY}&host=${UP_WS_HOST}"
+            FORWARD_URL="${FORWARD_URL}${UP_QUERY}"
+        fi
+
+        FORWARD_ARG="-F $FORWARD_URL"
+        log_msg "Forward URL: $FORWARD_URL"
+    fi
+fi
+
+# ---- Start gost ----
 log_msg "Starting gost proxy..."
+log_msg "Command: $GOST_BIN -L $LISTEN_URL $FORWARD_ARG"
 
 cd "$MODDIR/gost"
-"$GOST_BIN" -C "$CONFIG" >> "$LOGFILE" 2>&1 &
+if [ -n "$FORWARD_ARG" ]; then
+    "$GOST_BIN" -L "$LISTEN_URL" $FORWARD_ARG >> "$LOGFILE" 2>&1 &
+else
+    "$GOST_BIN" -L "$LISTEN_URL" >> "$LOGFILE" 2>&1 &
+fi
 GOST_PID=$!
 
-sleep 1
+sleep 2
 
 if kill -0 "$GOST_PID" 2>/dev/null; then
     echo "$GOST_PID" > "$PIDFILE"
     log_msg "gost started successfully (PID: $GOST_PID)"
     echo "gost started successfully (PID: $GOST_PID)"
 else
-    log_msg "ERROR: gost failed to start"
+    log_msg "ERROR: gost failed to start - check config"
     echo "ERROR: gost failed to start"
     exit 1
 fi
