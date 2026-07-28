@@ -75,7 +75,7 @@
     }
 
     function loadStatus() {
-        fetchJSON("/api/status")
+        fetchJSON("/cgi-bin/api?endpoint=status")
             .then(function (data) {
                 updateDashboard(data);
             })
@@ -83,7 +83,7 @@
     }
 
     function loadConfig() {
-        fetchJSON("/api/config")
+        fetchJSON("/cgi-bin/api?endpoint=config")
             .then(function (config) {
                 applyConfigToForm(config);
             })
@@ -334,7 +334,7 @@
 
     function saveConfig() {
         var config = collectConfig();
-        fetchJSON("/api/config", {
+        fetchJSON("/cgi-bin/api?endpoint=config", {
             method: "POST",
             body: config
         })
@@ -367,7 +367,7 @@
         reader.onload = function (e) {
             try {
                 var config = JSON.parse(e.target.result);
-                fetchJSON("/api/config", {
+                fetchJSON("/cgi-bin/api?endpoint=config", {
                     method: "POST",
                     body: config
                 })
@@ -387,7 +387,7 @@
     }
 
     function loadLogs() {
-        fetchJSON("/api/logs?lines=200")
+        fetchJSON("/cgi-bin/api?endpoint=logs&lines=200")
             .then(function (data) {
                 $("logView").textContent = data.logs || "No logs.";
                 var logView = $("logView");
@@ -397,7 +397,7 @@
     }
 
     function loadCommand() {
-        fetchJSON("/api/command")
+        fetchJSON("/cgi-bin/api?endpoint=command")
             .then(function (data) {
                 $("commandPreview").textContent = data.command || "-";
             })
@@ -407,7 +407,7 @@
     }
 
     function gostAction(action) {
-        fetchJSON("/api/" + action, { method: "POST" })
+        fetchJSON("/cgi-bin/api?endpoint=" + action, { method: "POST" })
             .then(function (res) {
                 showToast(res.message || (action + " done"), res.success ? "success" : "error");
                 setTimeout(function () {

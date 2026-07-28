@@ -83,6 +83,7 @@ chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
 chmod 755 "$MODDIR/scripts/download_gost.sh"
 chmod 755 "$MODDIR/webui/server.sh"
+chmod 755 "$MODDIR/webui/cgi-bin/api" 2>/dev/null
 chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"

@@ -1,0 +1,188 @@
+#!/system/bin/sh
+#
+# api - CGI script for Gost WebUI API
+# Executed by busybox httpd for /cgi-bin/api requests
+#
+# Env vars from httpd:
+#   REQUEST_METHOD  - GET/POST
+#   QUERY_STRING    - e.g. "endpoint=status"
+#   CONTENT_LENGTH  - length of POST body
+#   stdin           - POST body (for POST)
+#
+
+# ---- Determine MODDIR from script path ----
+SCRIPT_PATH="$0"
+CGI_DIR=$(dirname "$SCRIPT_PATH" 2>/dev/null)
+WEBUI_DIR=$(dirname "$CGI_DIR" 2>/dev/null)
+MODDIR=$(dirname "$WEBUI_DIR" 2>/dev/null)
+
+# Fallback if dirname failed
+if [ ! -d "$MODDIR/gost" ]; then
+    MODDIR="/data/adb/modules/gost_proxy"
+fi
+
+CONFIG="$MODDIR/gost/config.json"
+LOG_PATH="$MODDIR/logs/gost.log"
+PIDFILE="/tmp/gost.pid"
+
+# ---- Parse query string ----
+ENDPOINT=""
+LINES="200"
+Q="$QUERY_STRING"
+for pair in $(echo "$Q" | tr '&' ' ' 2>/dev/null); do
+    key=$(echo "$pair" | cut -d'=' -f1 2>/dev/null)
+    val=$(echo "$pair" | cut -d'=' -f2 2>/dev/null)
+    case "$key" in
+        endpoint) ENDPOINT="$val" ;;
+        lines)    LINES="$val" ;;
+    esac
+done
+
+# ---- Read POST body ----
+BODY=""
+if [ "$REQUEST_METHOD" = "POST" ] && [ -n "$CONTENT_LENGTH" ]; then
+    if [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
+        BODY=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
+    fi
+fi
+
+# ---- Helpers ----
+json_header() {
+    printf 'Content-Type: application/json; charset=utf-8\r\n'
+    printf 'Access-Control-Allow-Origin: *\r\n'
+    printf 'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
+    printf 'Access-Control-Allow-Headers: Content-Type\r\n'
+    printf '\r\n'
+}
+
+jval() {
+    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+}
+
+# ---- Route by endpoint ----
+case "$ENDPOINT" in
+    status)
+        GOST_STATUS="stopped"
+        GOST_PID=""
+        if [ -f "$PIDFILE" ]; then
+            GOST_PID=$(cat "$PIDFILE" 2>/dev/null)
+            if [ -n "$GOST_PID" ] && kill -0 "$GOST_PID" 2>/dev/null; then
+                GOST_STATUS="running"
+            else
+                GOST_PID=""
+            fi
+        fi
+        ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
+        LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
+        PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+        LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
+        WP=$(jval webui_port);  [ -z "$WP" ] && WP="8080"
+        json_header
+        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s"}' \
+            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA"
+        ;;
+
+    config)
+        if [ "$REQUEST_METHOD" = "GET" ]; then
+            if [ -f "$CONFIG" ]; then
+                printf 'Content-Type: application/json; charset=utf-8\r\n\r\n'
+                cat "$CONFIG"
+            else
+                json_header
+                printf '{"error":"Config not found"}'
+            fi
+        elif [ "$REQUEST_METHOD" = "POST" ]; then
+            if [ -n "$BODY" ]; then
+                printf '%s' "$BODY" > "$CONFIG"
+                json_header
+                printf '{"success":true,"message":"Config saved"}'
+            else
+                json_header
+                printf '{"success":false,"message":"Empty body"}'
+            fi
+        fi
+        ;;
+
+    start)
+        sh "$MODDIR/scripts/start.sh" "$MODDIR" >/dev/null 2>&1
+        sleep 1
+        json_header
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            printf '{"success":true,"message":"gost started (PID: %s)"}' "$(cat "$PIDFILE")"
+        else
+            printf '{"success":false,"message":"gost failed to start"}'
+        fi
+        ;;
+
+    stop)
+        sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
+        sleep 1
+        json_header
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            printf '{"success":false,"message":"gost failed to stop"}'
+        else
+            printf '{"success":true,"message":"gost stopped"}'
+        fi
+        ;;
+
+    restart)
+        sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
+        sleep 1
+        sh "$MODDIR/scripts/start.sh" "$MODDIR" >/dev/null 2>&1
+        sleep 1
+        json_header
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            printf '{"success":true,"message":"gost restarted (PID: %s)"}' "$(cat "$PIDFILE")"
+        else
+            printf '{"success":false,"message":"gost failed to restart"}'
+        fi
+        ;;
+
+    logs)
+        [ -z "$LINES" ] && LINES=200
+        if [ -f "$LOG_PATH" ]; then
+            LOGS=$(tail -n "$LINES" "$LOG_PATH" 2>/dev/null)
+        else
+            LOGS="No logs available."
+        fi
+        LOGS_ESCAPED=$(printf '%s' "$LOGS" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')
+        json_header
+        printf '{"logs":"%s"}' "$LOGS_ESCAPED"
+        ;;
+
+    command)
+        PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+        LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
+        LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
+        json_header
+        printf '{"command":"-L %s://%s:%s"}' "$PT" "$LA" "$LP"
+        ;;
+
+    parse-link)
+        json_header
+        printf '{"success":false,"message":"Not supported"}'
+        ;;
+
+    config/import)
+        if [ -n "$BODY" ]; then
+            printf '%s' "$BODY" > "$CONFIG"
+            json_header
+            printf '{"success":true,"message":"Config imported"}'
+        else
+            json_header
+            printf '{"success":false,"message":"Empty body"}'
+        fi
+        ;;
+
+    "")
+        json_header
+        printf '{"error":"No endpoint specified"}'
+        ;;
+
+    *)
+        json_header
+        printf '{"error":"Unknown endpoint: %s"}' "$ENDPOINT"
+        ;;
+esac
+
+exit 0
