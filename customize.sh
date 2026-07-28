@@ -4,9 +4,45 @@ SKIPUNZIP=1
 
 MODDIR=${MODPATH}
 
+# ---- Detect old module path (for config preservation on update) ----
+OLD_MODDIR="/data/adb/modules/gost_proxy"
+if [ -d "/data/adb/ksu/modules/gost_proxy" ]; then
+    OLD_MODDIR="/data/adb/ksu/modules/gost_proxy"
+fi
+
 ui_print "========================================"
 ui_print " Gost Proxy Module Installer"
 ui_print "========================================"
+ui_print ""
+
+# ---- Preserve existing config before extraction ----
+PRESERVE_DIR="/tmp/gost_preserve"
+rm -rf "$PRESERVE_DIR"
+mkdir -p "$PRESERVE_DIR"
+
+if [ -f "$OLD_MODDIR/gost/config.json" ]; then
+    ui_print "- Found existing config, preserving..."
+    cp "$OLD_MODDIR/gost/config.json" "$PRESERVE_DIR/config.json"
+    
+    # Preserve nodes directory
+    if [ -d "$OLD_MODDIR/gost/nodes" ]; then
+        cp -r "$OLD_MODDIR/gost/nodes" "$PRESERVE_DIR/nodes"
+    fi
+    
+    # Preserve active node file
+    if [ -f "$OLD_MODDIR/gost/active" ]; then
+        cp "$OLD_MODDIR/gost/active" "$PRESERVE_DIR/active"
+    fi
+    
+    # Preserve gost binary (avoid re-download if same arch)
+    if [ -f "$OLD_MODDIR/gost/gost" ]; then
+        cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost_bin"
+    fi
+    
+    ui_print "- Config and nodes preserved."
+else
+    ui_print "- No existing config found (fresh install)."
+fi
 ui_print ""
 
 ARCH=$(getprop ro.product.cpu.abi)
@@ -45,6 +81,38 @@ mkdir -p "$MODDIR/logs"
 ui_print "Extracting module files..."
 unzip -o "$ZIPFILE" -d "$MODDIR" >/dev/null 2>&1
 
+# ---- Restore preserved config ----
+if [ -f "$PRESERVE_DIR/config.json" ]; then
+    ui_print "- Restoring preserved config..."
+    cp "$PRESERVE_DIR/config.json" "$MODDIR/gost/config.json"
+    
+    if [ -d "$PRESERVE_DIR/nodes" ]; then
+        mkdir -p "$MODDIR/gost/nodes"
+        cp -r "$PRESERVE_DIR/nodes/"* "$MODDIR/gost/nodes/" 2>/dev/null
+    fi
+    
+    if [ -f "$PRESERVE_DIR/active" ]; then
+        cp "$PRESERVE_DIR/active" "$MODDIR/gost/active"
+    fi
+    
+    # Restore gost binary if zip doesn't have a real one
+    if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+        if [ -f "$PRESERVE_DIR/gost_bin" ]; then
+            cp "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"
+            ui_print "- Restored existing gost binary."
+        fi
+    fi
+    
+    ui_print "- Config restored successfully."
+fi
+
+# Clean up
+rm -rf "$PRESERVE_DIR"
+
+# ---- Ensure nodes directory exists ----
+mkdir -p "$MODDIR/gost/nodes"
+
+# ---- Handle gost binary ----
 if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
     ui_print ""
     ui_print "gost binary not found or is placeholder."
@@ -91,5 +159,5 @@ chmod 755 "$MODDIR/uninstall.sh"
 ui_print ""
 ui_print "Installation complete!"
 ui_print "Gost proxy will start on boot."
-ui_print "WebUI: http://127.0.0.1:8080 (pure shell, no Python needed)"
+ui_print "WebUI: http://127.0.0.1:8080"
 ui_print "========================================"

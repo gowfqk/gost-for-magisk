@@ -1,0 +1,41 @@
+{
+    "proxy_type": "socks5",
+    "listen_port": 1080,
+    "listen_addr": "0.0.0.0",
+    "webui_port": 8080,
+    "auth": {
+        "enabled": false,
+        "username": "",
+        "password": ""
+    },
+    "upstream": {
+        "enabled": true,
+        "type": "socks5+wss",
+        "addr": "t-hkbn75-1002.ci-lab.com",
+        "port": 80,
+        "username": "pro",
+        "password": "u2025887:3de79113-832d-436c-a2c6-dcf62f0be38e",
+        "route": "",
+        "ws_path": "/gost",
+        "ws_host": ""
+    },
+    "shadowsocks": {
+        "method": "aes-256-cfb",
+        "password": ""
+    },
+    "tls": {
+        "cert": "",
+        "key": "",
+        "ca": ""
+    },
+    "websocket": {
+        "path": "/ws",
+        "host": ""
+    },
+    "advanced": {
+        "dns": "",
+        "log_level": "info",
+        "routes": [],
+        "multi_listen": []
+    }
+}

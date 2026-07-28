@@ -3,12 +3,6 @@
 # api - CGI script for Gost WebUI API
 # Executed by busybox httpd for /cgi-bin/api requests
 #
-# Env vars from httpd:
-#   REQUEST_METHOD  - GET/POST
-#   QUERY_STRING    - e.g. "endpoint=status"
-#   CONTENT_LENGTH  - length of POST body
-#   stdin           - POST body (for POST)
-#
 
 # ---- Determine MODDIR from script path ----
 SCRIPT_PATH="$0"
@@ -16,14 +10,17 @@ CGI_DIR=$(dirname "$SCRIPT_PATH" 2>/dev/null)
 WEBUI_DIR=$(dirname "$CGI_DIR" 2>/dev/null)
 MODDIR=$(dirname "$WEBUI_DIR" 2>/dev/null)
 
-# Fallback if dirname failed
 if [ ! -d "$MODDIR/gost" ]; then
     MODDIR="/data/adb/modules/gost_proxy"
 fi
 
 CONFIG="$MODDIR/gost/config.json"
+NODES_DIR="$MODDIR/gost/nodes"
+ACTIVE_FILE="$MODDIR/gost/active"
 LOG_PATH="$MODDIR/logs/gost.log"
 PIDFILE="/tmp/gost.pid"
+
+mkdir -p "$NODES_DIR"
 
 # ---- Parse query string ----
 ENDPOINT=""
@@ -55,8 +52,39 @@ json_header() {
     printf '\r\n'
 }
 
+# Use .*":  to avoid truncating values containing colons (e.g. passwords)
 jval() {
-    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*":[[:space:]]*//' | tr -d '"'
+}
+
+jsection_val() {
+    _section="$1" _key="$2"
+    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" | head -1 | sed 's/.*":[[:space:]]*//' | tr -d '"'
+}
+
+# Extract a field from a specific JSON file
+jval_file() {
+    _file="$1" _key="$2"
+    grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" "$_file" 2>/dev/null | head -1 | sed 's/.*":[[:space:]]*//' | tr -d '"'
+}
+
+jsection_val_file() {
+    _file="$1" _section="$2" _key="$3"
+    sed -n "/\"$_section\"/,/}/p" "$_file" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" | head -1 | sed 's/.*":[[:space:]]*//' | tr -d '"'
+}
+
+# Extract "name" from JSON body
+extract_json_name() {
+    echo "$BODY" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"//' | tr -d '"'
+}
+
+# Get active node name
+get_active_node() {
+    if [ -f "$ACTIVE_FILE" ]; then
+        cat "$ACTIVE_FILE"
+    else
+        echo "default"
+    fi
 }
 
 # ---- Route by endpoint ----
@@ -77,9 +105,10 @@ case "$ENDPOINT" in
         PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         WP=$(jval webui_port);  [ -z "$WP" ] && WP="8080"
+        ACTIVE_NODE=$(get_active_node)
         json_header
-        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s"}' \
-            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA"
+        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s","active_node":"%s"}' \
+            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA" "$ACTIVE_NODE"
         ;;
 
     config)
@@ -100,6 +129,87 @@ case "$ENDPOINT" in
                 json_header
                 printf '{"success":false,"message":"Empty body"}'
             fi
+        fi
+        ;;
+
+    nodes)
+        ACTIVE_NODE=$(get_active_node)
+        # Build JSON array of nodes
+        NODES_JSON="["
+        _first=1
+        if [ -d "$NODES_DIR" ] && [ -n "$(ls "$NODES_DIR"/*.json 2>/dev/null)" ]; then
+            for _f in "$NODES_DIR"/*.json; do
+                [ -f "$_f" ] || continue
+                _name=$(basename "$_f" .json)
+                _ptype=$(jval_file "$_f" proxy_type)
+                [ -z "$_ptype" ] && _ptype="http"
+                _lport=$(jval_file "$_f" listen_port)
+                [ -z "$_lport" ] && _lport="1080"
+                _uaddr=$(jsection_val_file "$_f" upstream addr)
+                _uport=$(jsection_val_file "$_f" upstream port)
+                _utype=$(jsection_val_file "$_f" upstream type)
+                _uenabled=$(jsection_val_file "$_f" upstream enabled)
+                _is_active="false"
+                [ "$_name" = "$ACTIVE_NODE" ] && _is_active="true"
+                if [ $_first -eq 0 ]; then
+                    NODES_JSON="${NODES_JSON},"
+                fi
+                NODES_JSON="${NODES_JSON}{\"name\":\"${_name}\",\"proxy_type\":\"${_ptype}\",\"listen_port\":${_lport},\"upstream\":{\"enabled\":\"${_uenabled}\",\"type\":\"${_utype}\",\"addr\":\"${_uaddr}\",\"port\":\"${_uport}\"},\"active\":${_is_active}}"
+                _first=0
+            done
+        fi
+        NODES_JSON="${NODES_JSON}]"
+        json_header
+        printf '{"nodes":%s,"active":"%s"}' "$NODES_JSON" "$ACTIVE_NODE"
+        ;;
+
+    nodes/save)
+        NODE_NAME=$(extract_json_name)
+        if [ -z "$NODE_NAME" ]; then
+            json_header
+            printf '{"success":false,"message":"Node name required"}'
+        elif [ ! -f "$CONFIG" ]; then
+            json_header
+            printf '{"success":false,"message":"No active config to save"}'
+        else
+            cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json"
+            json_header
+            printf '{"success":true,"message":"Node saved","name":"%s"}' "$NODE_NAME"
+        fi
+        ;;
+
+    nodes/switch)
+        NODE_NAME=$(extract_json_name)
+        if [ -z "$NODE_NAME" ]; then
+            json_header
+            printf '{"success":false,"message":"Node name required"}'
+        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node not found"}'
+        else
+            cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
+            echo "$NODE_NAME" > "$ACTIVE_FILE"
+            json_header
+            printf '{"success":true,"message":"Switched to node","name":"%s"}' "$NODE_NAME"
+        fi
+        ;;
+
+    nodes/delete)
+        NODE_NAME=$(extract_json_name)
+        ACTIVE_NODE=$(get_active_node)
+        if [ -z "$NODE_NAME" ]; then
+            json_header
+            printf '{"success":false,"message":"Node name required"}'
+        elif [ "$NODE_NAME" = "$ACTIVE_NODE" ]; then
+            json_header
+            printf '{"success":false,"message":"Cannot delete active node"}'
+        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node not found"}'
+        else
+            rm -f "$NODES_DIR/${NODE_NAME}.json"
+            json_header
+            printf '{"success":true,"message":"Node deleted","name":"%s"}' "$NODE_NAME"
         fi
         ;;
 
@@ -154,13 +264,27 @@ case "$ENDPOINT" in
         PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
+        # Build full command preview
+        CMD="-L ${PT}://${LA}:${LP}"
+        UP_EN=$(jsection_val upstream enabled)
+        if [ "$UP_EN" = "true" ]; then
+            UP_TYPE=$(jsection_val upstream type); [ -z "$UP_TYPE" ] && UP_TYPE="http"
+            UP_ADDR=$(jsection_val upstream addr)
+            UP_PORT=$(jsection_val upstream port)
+            UP_USER=$(jsection_val upstream username)
+            UP_PASS=$(jsection_val upstream password)
+            UP_AUTH=""
+            if [ -n "$UP_USER" ]; then
+                UP_AUTH="${UP_USER}:${UP_PASS}@"
+            fi
+            CMD="${CMD} -F ${UP_TYPE}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
+            UP_WS=$(jsection_val upstream ws_path)
+            if [ -n "$UP_WS" ]; then
+                CMD="${CMD}?path=${UP_WS}"
+            fi
+        fi
         json_header
-        printf '{"command":"-L %s://%s:%s"}' "$PT" "$LA" "$LP"
-        ;;
-
-    parse-link)
-        json_header
-        printf '{"success":false,"message":"Not supported"}'
+        printf '{"command":"%s"}' "$CMD"
         ;;
 
     config/import)

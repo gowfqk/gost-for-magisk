@@ -13,19 +13,21 @@
                 <h1 class="logo">Gost Proxy</h1>
                 <span class="status-badge" id="globalStatus">
                     <span class="status-dot"></span>
-                    <span class="status-text">Loading</span>
+                    <span class="status-text" data-i18n="loading">Loading</span>
                 </span>
             </div>
             <div class="header-right">
                 <span class="arch-badge" id="archBadge"></span>
+                <button class="lang-btn" id="btnLang" title="Switch Language">EN</button>
             </div>
         </header>
 
         <nav class="nav">
-            <button class="nav-btn active" data-page="dashboard">Dashboard</button>
-            <button class="nav-btn" data-page="proxy">Proxy</button>
-            <button class="nav-btn" data-page="advanced">Advanced</button>
-            <button class="nav-btn" data-page="logs">Logs</button>
+            <button class="nav-btn active" data-page="dashboard" data-i18n="nav_dashboard">Dashboard</button>
+            <button class="nav-btn" data-page="proxy" data-i18n="nav_proxy">Proxy</button>
+            <button class="nav-btn" data-page="nodes" data-i18n="nav_nodes">Nodes</button>
+            <button class="nav-btn" data-page="advanced" data-i18n="nav_advanced">Advanced</button>
+            <button class="nav-btn" data-page="logs" data-i18n="nav_logs">Logs</button>
         </nav>
 
         <main class="main">
@@ -33,11 +35,11 @@
                 <div class="card-grid">
                     <div class="card">
                         <div class="card-header">
-                            <h3>Status</h3>
+                            <h3 data-i18n="status">Status</h3>
                         </div>
                         <div class="card-body">
                             <div class="info-row">
-                                <span class="info-label">Gost</span>
+                                <span class="info-label" data-i18n="gost">Gost</span>
                                 <span class="info-value" id="dashGostStatus">-</span>
                             </div>
                             <div class="info-row">
@@ -52,46 +54,50 @@
                     </div>
                     <div class="card">
                         <div class="card-header">
-                            <h3>Configuration</h3>
+                            <h3 data-i18n="configuration">Configuration</h3>
                         </div>
                         <div class="card-body">
                             <div class="info-row">
-                                <span class="info-label">Proxy Type</span>
+                                <span class="info-label" data-i18n="proxy_type">Proxy Type</span>
                                 <span class="info-value" id="dashProxyType">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-label">Listen</span>
+                                <span class="info-label" data-i18n="listen">Listen</span>
                                 <span class="info-value" id="dashListenAddr">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-label">Port</span>
+                                <span class="info-label" data-i18n="port">Port</span>
                                 <span class="info-value" id="dashListenPort">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label" data-i18n="node">Node</span>
+                                <span class="info-value" id="dashActiveNode">-</span>
                             </div>
                         </div>
                     </div>
                     <div class="card">
                         <div class="card-header">
-                            <h3>System</h3>
+                            <h3 data-i18n="system">System</h3>
                         </div>
                         <div class="card-body">
                             <div class="info-row">
-                                <span class="info-label">Architecture</span>
+                                <span class="info-label" data-i18n="architecture">Architecture</span>
                                 <span class="info-value" id="dashArch">-</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-label">WebUI Port</span>
+                                <span class="info-label" data-i18n="webui_port">WebUI Port</span>
                                 <span class="info-value" id="dashWebuiPort">-</span>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="control-bar">
-                    <button class="btn btn-start" id="btnStart">Start</button>
-                    <button class="btn btn-stop" id="btnStop">Stop</button>
-                    <button class="btn btn-restart" id="btnRestart">Restart</button>
+                    <button class="btn btn-start" id="btnStart" data-i18n="start">Start</button>
+                    <button class="btn btn-stop" id="btnStop" data-i18n="stop">Stop</button>
+                    <button class="btn btn-restart" id="btnRestart" data-i18n="restart">Restart</button>
                 </div>
                 <div class="card" style="margin-top:16px">
-                    <div class="card-header"><h3>Gost Command</h3></div>
+                    <div class="card-header"><h3 data-i18n="gost_command">Gost Command</h3></div>
                     <div class="card-body">
                         <code class="command-preview" id="commandPreview">-</code>
                     </div>
@@ -100,24 +106,24 @@
 
             <section class="page" id="page-proxy">
                 <div class="card">
-                    <div class="card-header"><h3>Proxy Type</h3></div>
+                    <div class="card-header"><h3 data-i18n="proxy_type">Proxy Type</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Type</label>
+                            <label class="form-label" data-i18n="type">Type</label>
                             <select class="form-select" id="proxyType">
-                                <option value="http">HTTP Proxy</option>
-                                <option value="socks5">SOCKS5 Proxy</option>
-                                <option value="ss">Shadowsocks</option>
-                                <option value="tls">TLS Tunnel</option>
-                                <option value="ws">WebSocket Tunnel</option>
+                                <option value="http" data-i18n="http_proxy">HTTP Proxy</option>
+                                <option value="socks5" data-i18n="socks5_proxy">SOCKS5 Proxy</option>
+                                <option value="ss" data-i18n="shadowsocks">Shadowsocks</option>
+                                <option value="tls" data-i18n="tls_tunnel">TLS Tunnel</option>
+                                <option value="ws" data-i18n="ws_tunnel">WebSocket Tunnel</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Listen Address</label>
+                            <label class="form-label" data-i18n="listen_addr">Listen Address</label>
                             <input type="text" class="form-input" id="listenAddr" value="0.0.0.0" placeholder="0.0.0.0">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Listen Port</label>
+                            <label class="form-label" data-i18n="listen_port">Listen Port</label>
                             <input type="number" class="form-input" id="listenPort" value="1080" min="1" max="65535">
                         </div>
                     </div>
@@ -125,7 +131,7 @@
 
                 <div class="card" id="authCard">
                     <div class="card-header">
-                        <h3>Authentication</h3>
+                        <h3 data-i18n="authentication">Authentication</h3>
                         <label class="toggle">
                             <input type="checkbox" id="authEnabled">
                             <span class="toggle-slider"></span>
@@ -133,21 +139,21 @@
                     </div>
                     <div class="card-body" id="authFields" style="display:none">
                         <div class="form-group">
-                            <label class="form-label">Username</label>
+                            <label class="form-label" data-i18n="username">Username</label>
                             <input type="text" class="form-input" id="authUsername" placeholder="username">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
+                            <label class="form-label" data-i18n="password">Password</label>
                             <input type="password" class="form-input" id="authPassword" placeholder="password">
                         </div>
                     </div>
                 </div>
 
                 <div class="card" id="ssCard" style="display:none">
-                    <div class="card-header"><h3>Shadowsocks</h3></div>
+                    <div class="card-header"><h3 data-i18n="shadowsocks">Shadowsocks</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Encrypt Method</label>
+                            <label class="form-label" data-i18n="encrypt_method">Encrypt Method</label>
                             <select class="form-select" id="ssMethod">
                                 <option value="aes-256-cfb">AES-256-CFB</option>
                                 <option value="aes-128-cfb">AES-128-CFB</option>
@@ -160,7 +166,7 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
+                            <label class="form-label" data-i18n="password">Password</label>
                             <input type="password" class="form-input" id="ssPassword" placeholder="shadowsocks password">
                         </div>
                     </div>
@@ -170,15 +176,15 @@
                     <div class="card-header"><h3>TLS</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Certificate Path</label>
+                            <label class="form-label" data-i18n="cert_path">Certificate Path</label>
                             <input type="text" class="form-input" id="tlsCert" placeholder="/path/to/cert.pem">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Key Path</label>
+                            <label class="form-label" data-i18n="key_path">Key Path</label>
                             <input type="text" class="form-input" id="tlsKey" placeholder="/path/to/key.pem">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">CA Path</label>
+                            <label class="form-label" data-i18n="ca_path">CA Path</label>
                             <input type="text" class="form-input" id="tlsCa" placeholder="/path/to/ca.pem">
                         </div>
                     </div>
@@ -188,11 +194,11 @@
                     <div class="card-header"><h3>WebSocket</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">WS Path</label>
+                            <label class="form-label" data-i18n="ws_path">WS Path</label>
                             <input type="text" class="form-input" id="wsPath" value="/ws" placeholder="/ws">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">WS Host</label>
+                            <label class="form-label" data-i18n="ws_host">WS Host</label>
                             <input type="text" class="form-input" id="wsHost" placeholder="example.com">
                         </div>
                     </div>
@@ -200,7 +206,7 @@
 
                 <div class="card" id="upstreamCard">
                     <div class="card-header">
-                        <h3>Upstream Proxy</h3>
+                        <h3 data-i18n="upstream_proxy">Upstream Proxy</h3>
                         <label class="toggle">
                             <input type="checkbox" id="upstreamEnabled">
                             <span class="toggle-slider"></span>
@@ -208,63 +214,100 @@
                     </div>
                     <div class="card-body" id="upstreamFields" style="display:none">
                         <div class="form-group">
-                            <label class="form-label">Type</label>
-                            <select class="form-select" id="upstreamType">
-                                <option value="http">HTTP</option>
-                                <option value="socks5">SOCKS5</option>
-                                <option value="ss">Shadowsocks</option>
-                            </select>
+                            <label class="form-label" data-i18n="type">Type</label>
+                            <input type="text" class="form-input" id="upstreamType" list="upstreamTypeList" placeholder="socks5+wss">
+                            <datalist id="upstreamTypeList">
+                                <option value="http">
+                                <option value="socks5">
+                                <option value="socks5+wss">
+                                <option value="socks5+ws">
+                                <option value="http+ws">
+                                <option value="http+wss">
+                                <option value="ss">
+                                <option value="relay">
+                                <option value="relay+ws">
+                                <option value="relay+wss">
+                            </datalist>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Address</label>
+                            <label class="form-label" data-i18n="address">Address</label>
                             <input type="text" class="form-input" id="upstreamAddr" placeholder="proxy.example.com">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Port</label>
+                            <label class="form-label" data-i18n="port">Port</label>
                             <input type="number" class="form-input" id="upstreamPort" min="1" max="65535">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Username</label>
+                            <label class="form-label" data-i18n="username">Username</label>
                             <input type="text" class="form-input" id="upstreamUsername" placeholder="(optional)">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
+                            <label class="form-label" data-i18n="password">Password</label>
                             <input type="password" class="form-input" id="upstreamPassword" placeholder="(optional)">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Transport</label>
+                            <label class="form-label" data-i18n="transport">Transport</label>
                             <select class="form-select" id="upstreamRoute">
-                                <option value="">Direct</option>
+                                <option value="" data-i18n="direct">Direct</option>
                                 <option value="ws">WebSocket</option>
                                 <option value="wss">WebSocket+TLS</option>
                             </select>
                         </div>
                         <div class="form-group" id="upstreamWsPathGroup" style="display:none">
-                            <label class="form-label">WS Path</label>
+                            <label class="form-label" data-i18n="ws_path">WS Path</label>
                             <input type="text" class="form-input" id="upstreamWsPath" placeholder="/gost">
                         </div>
                         <div class="form-group" id="upstreamWsHostGroup" style="display:none">
-                            <label class="form-label">WS Host</label>
+                            <label class="form-label" data-i18n="ws_host">WS Host</label>
                             <input type="text" class="form-input" id="upstreamWsHost" placeholder="example.com">
                         </div>
                     </div>
                 </div>
 
                 <div class="card" id="importLinkCard">
-                    <div class="card-header"><h3>Import Link</h3></div>
+                    <div class="card-header"><h3 data-i18n="import_link">Import Link</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <input type="text" class="form-input" id="importLinkInput" placeholder="粘贴代理链接，如 socks://...">
+                            <input type="text" class="form-input" id="importLinkInput" placeholder="socks://..." data-i18n-ph="import_link_ph">
                         </div>
-                        <button class="btn btn-primary" id="btnImportLink">Import Link</button>
+                        <button class="btn btn-primary" id="btnImportLink" data-i18n="import_link">Import Link</button>
                     </div>
                 </div>
 
                 <div class="action-bar">
-                    <button class="btn btn-primary" id="btnSaveConfig">Save Config</button>
-                    <button class="btn btn-secondary" id="btnExportConfig">Export</button>
-                    <button class="btn btn-secondary" id="btnImportConfig">Import</button>
+                    <button class="btn btn-primary" id="btnSaveConfig" data-i18n="save_config">Save Config</button>
+                    <button class="btn btn-secondary" id="btnExportConfig" data-i18n="export">Export</button>
+                    <button class="btn btn-secondary" id="btnImportConfig" data-i18n="import">Import</button>
                     <input type="file" id="importFileInput" accept=".json" style="display:none">
+                </div>
+            </section>
+
+            <section class="page" id="page-nodes">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 data-i18n="save_current_as_node">Save Current as Node</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label" data-i18n="node_name">Node Name</label>
+                            <div class="node-save-row">
+                                <input type="text" class="form-input" id="nodeSaveName" placeholder="hk-node" data-i18n-ph="node_name_ph">
+                                <button class="btn btn-primary" id="btnNodeSave" data-i18n="save">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 data-i18n="saved_nodes">Saved Nodes</h3>
+                        <button class="btn btn-sm btn-secondary" id="btnRefreshNodes" data-i18n="refresh">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="nodeList" class="node-list">
+                            <p class="text-muted" data-i18n="loading_nodes">Loading nodes...</p>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -273,16 +316,16 @@
                     <div class="card-header"><h3>DNS</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">DNS Servers</label>
+                            <label class="form-label" data-i18n="dns_servers">DNS Servers</label>
                             <input type="text" class="form-input" id="advDns" placeholder="8.8.8.8,8.8.4.4">
                         </div>
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><h3>Logging</h3></div>
+                    <div class="card-header"><h3 data-i18n="logging">Logging</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Log Level</label>
+                            <label class="form-label" data-i18n="log_level">Log Level</label>
                             <select class="form-select" id="advLogLevel">
                                 <option value="debug">Debug</option>
                                 <option value="info" selected>Info</option>
@@ -297,49 +340,49 @@
                     <div class="card-header"><h3>WebUI</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">WebUI Port</label>
+                            <label class="form-label" data-i18n="webui_port">WebUI Port</label>
                             <input type="number" class="form-input" id="advWebuiPort" value="8080" min="1" max="65535">
                         </div>
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><h3>Multi-Port Listen</h3></div>
+                    <div class="card-header"><h3 data-i18n="multi_port_listen">Multi-Port Listen</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Additional Listen Ports (comma separated)</label>
+                            <label class="form-label" data-i18n="additional_listen_ports">Additional Listen Ports (comma separated)</label>
                             <input type="text" class="form-input" id="advMultiListen" placeholder="1081,1082">
                         </div>
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><h3>Routes</h3></div>
+                    <div class="card-header"><h3 data-i18n="routes">Routes</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <label class="form-label">Route Rules (JSON array)</label>
+                            <label class="form-label" data-i18n="route_rules">Route Rules (JSON array)</label>
                             <textarea class="form-textarea" id="advRoutes" rows="4" placeholder='[{"serve": "tcp://:0", "chain": "chain-0"}]'></textarea>
                         </div>
                     </div>
                 </div>
                 <div class="action-bar">
-                    <button class="btn btn-primary" id="btnSaveAdvanced">Save Advanced Config</button>
+                    <button class="btn btn-primary" id="btnSaveAdvanced" data-i18n="save_advanced_config">Save Advanced Config</button>
                 </div>
             </section>
 
             <section class="page" id="page-logs">
                 <div class="card">
                     <div class="card-header">
-                        <h3>Gost Logs</h3>
+                        <h3 data-i18n="gost_logs">Gost Logs</h3>
                         <div class="log-controls">
-                            <button class="btn btn-sm btn-secondary" id="btnRefreshLogs">Refresh</button>
+                            <button class="btn btn-sm btn-secondary" id="btnRefreshLogs" data-i18n="refresh">Refresh</button>
                             <label class="toggle toggle-sm">
                                 <input type="checkbox" id="logAutoRefresh" checked>
                                 <span class="toggle-slider"></span>
                             </label>
-                            <span class="toggle-label">Auto</span>
+                            <span class="toggle-label" data-i18n="auto">Auto</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <pre class="log-view" id="logView">Loading logs...</pre>
+                        <pre class="log-view" id="logView" data-i18n="loading_logs">Loading logs...</pre>
                     </div>
                 </div>
             </section>
