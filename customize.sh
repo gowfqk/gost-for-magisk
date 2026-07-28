@@ -82,19 +82,13 @@ chmod 755 "$MODDIR/scripts/stop.sh"
 chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
 chmod 755 "$MODDIR/scripts/download_gost.sh"
+chmod 755 "$MODDIR/webui/server.sh"
 chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"
 
-if command -v python3 >/dev/null 2>&1; then
-    ui_print "Python3 detected - WebUI will be available."
-else
-    ui_print "WARNING: Python3 not found."
-    ui_print "WebUI requires Python3. Install via Termux if needed."
-fi
-
 ui_print ""
 ui_print "Installation complete!"
 ui_print "Gost proxy will start on boot."
-ui_print "WebUI will be available at http://127.0.0.1:8080"
+ui_print "WebUI: http://127.0.0.1:8080 (pure shell, no Python needed)"
 ui_print "========================================"

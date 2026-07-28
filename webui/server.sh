@@ -9,8 +9,7 @@
 #
 
 # ============ Handler Mode ============
-# When called with --handle, read HTTP request from stdin,
-# process it, and write HTTP response to stdout.
+# Read HTTP request from stdin, write HTTP response to stdout.
 if [ "$1" = "--handle" ]; then
     MODDIR="$2"
     CONFIG="$MODDIR/gost/config.json"
@@ -22,19 +21,25 @@ if [ "$1" = "--handle" ]; then
     PORT=$(grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG" 2>/dev/null | grep -o '[0-9]*')
     [ -z "$PORT" ] && PORT=8080
 
-    # ---- Read HTTP request ----
-    read -r REQUEST_LINE
+    # ---- Read HTTP request line ----
+    read -r REQUEST_LINE 2>/dev/null
     METHOD=$(echo "$REQUEST_LINE" | awk '{print $1}')
     URL=$(echo "$REQUEST_LINE" | awk '{print $2}')
 
-    # Strip query string from URL
+    # Fallback for empty request
+    if [ -z "$METHOD" ] || [ -z "$URL" ]; then
+        printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n400 Bad Request'
+        exit 0
+    fi
+
+    # Strip query string
     PATH_ONLY=$(echo "$URL" | cut -d'?' -f1)
     QUERY=$(echo "$URL" | cut -d'?' -f2)
     [ "$QUERY" = "$URL" ] && QUERY=""
 
     # Read headers
     CONTENT_LENGTH=0
-    while IFS= read -r hdr; do
+    while IFS= read -r hdr 2>/dev/null; do
         hdr=$(echo "$hdr" | tr -d '\r')
         [ -z "$hdr" ] && break
         case "$hdr" in
@@ -68,7 +73,6 @@ if [ "$1" = "--handle" ]; then
             printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n404 Not Found'
             return
         fi
-        # Determine MIME type
         case "$FILE" in
             *.html)  MIME="text/html; charset=utf-8" ;;
             *.js)    MIME="application/javascript; charset=utf-8" ;;
@@ -78,7 +82,7 @@ if [ "$1" = "--handle" ]; then
             *.svg)   MIME="image/svg+xml" ;;
             *)       MIME="application/octet-stream" ;;
         esac
-        SIZE=$(wc -c < "$FILE" 2>/dev/null)
+        SIZE=$(wc -c < "$FILE" 2>/dev/null | tr -d ' ')
         printf 'HTTP/1.1 200 OK\r\n'
         printf 'Content-Type: %s\r\n' "$MIME"
         printf 'Content-Length: %s\r\n' "$SIZE"
@@ -87,7 +91,6 @@ if [ "$1" = "--handle" ]; then
         cat "$FILE"
     }
 
-    # Simple JSON value extractor
     jval() {
         grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
     }
@@ -95,7 +98,6 @@ if [ "$1" = "--handle" ]; then
     # ---- Route request ----
     case "$PATH_ONLY" in
         /api/status)
-            # Check gost status
             GOST_STATUS="stopped"
             GOST_PID=""
             if [ -f "$PIDFILE" ]; then
@@ -106,16 +108,13 @@ if [ "$1" = "--handle" ]; then
                     GOST_PID=""
                 fi
             fi
-            # Get arch
             ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
-            # Get config values
             LISTEN_PORT=$(jval listen_port)
             PROXY_TYPE=$(jval proxy_type)
             LISTEN_ADDR=$(jval listen_addr)
             [ -z "$LISTEN_PORT" ] && LISTEN_PORT="1080"
             [ -z "$PROXY_TYPE" ] && PROXY_TYPE="http"
             [ -z "$LISTEN_ADDR" ] && LISTEN_ADDR="0.0.0.0"
-            # Build JSON response
             send_json "{\"gost\":{\"status\":\"$GOST_STATUS\",\"pid\":\"$GOST_PID\"},\"webui\":{\"status\":\"running\",\"port\":$PORT},\"arch\":\"$ARCH\",\"listen_port\":$LISTEN_PORT,\"proxy_type\":\"$PROXY_TYPE\",\"listen_addr\":\"$LISTEN_ADDR\"}"
             ;;
 
@@ -128,7 +127,7 @@ if [ "$1" = "--handle" ]; then
                 fi
             elif [ "$METHOD" = "POST" ]; then
                 if [ -n "$BODY" ]; then
-                    echo "$BODY" > "$CONFIG"
+                    printf '%s' "$BODY" > "$CONFIG"
                     send_json '{"success":true,"message":"Config saved"}'
                 else
                     send_json '{"success":false,"message":"Empty body"}'
@@ -179,13 +178,11 @@ if [ "$1" = "--handle" ]; then
             else
                 LOGS="No logs available."
             fi
-            # Escape for JSON
             LOGS_ESCAPED=$(printf '%s' "$LOGS" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' '\f' | sed 's/\f/\\n/g')
             send_json "{\"logs\":\"$LOGS_ESCAPED\"}"
             ;;
 
         /api/command)
-            # Build a simplified gost command preview
             PT=$(jval proxy_type)
             LA=$(jval listen_addr)
             LP=$(jval listen_port)
@@ -202,7 +199,7 @@ if [ "$1" = "--handle" ]; then
 
         /api/config/import)
             if [ -n "$BODY" ]; then
-                echo "$BODY" > "$CONFIG"
+                printf '%s' "$BODY" > "$CONFIG"
                 send_json '{"success":true,"message":"Config imported"}'
             else
                 send_json '{"success":false,"message":"Empty body"}'
@@ -217,20 +214,17 @@ if [ "$1" = "--handle" ]; then
             printf '\r\n'
             ;;
 
+        /|/index.html)
+            send_static "$WEBUI_DIR/index.html"
+            ;;
+
         /*)
-            # Serve static files
             FILE_PATH="$WEBUI_DIR$PATH_ONLY"
             if [ -f "$FILE_PATH" ]; then
                 send_static "$FILE_PATH"
-            elif [ -d "$FILE_PATH" ] && [ -f "$FILE_PATH/index.html" ]; then
-                send_static "$FILE_PATH/index.html"
             else
                 printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n404 Not Found'
             fi
-            ;;
-
-        *)
-            printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n404 Not Found'
             ;;
     esac
 
@@ -250,43 +244,105 @@ log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
 }
 
-log_msg "Starting shell-based WebUI server on port $PORT"
-log_msg "Module dir: $MODDIR"
+log_msg "=========================================="
+log_msg "Starting WebUI server (pure shell mode)"
+log_msg "MODDIR=$MODDIR  PORT=$PORT"
+log_msg "SCRIPT=$SCRIPT"
 
 # Write PID
 echo $$ > "$PIDFILE"
 
-# Find nc binary
-NC=""
-for cmd in nc busybox; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-        NC="$cmd"
+# ---- Find busybox ----
+BB=""
+for path in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /system/bin/busybox /system/xbin/busybox; do
+    if [ -x "$path" ]; then
+        BB="$path"
         break
     fi
 done
-if [ -z "$NC" ]; then
-    log_msg "ERROR: nc not found"
+if [ -z "$BB" ]; then
+    BB=$(command -v busybox 2>/dev/null)
+fi
+if [ -z "$BB" ]; then
+    log_msg "ERROR: busybox not found anywhere"
     exit 1
 fi
+log_msg "busybox=$BB"
 
-# Check if nc supports -e option (for executing handler directly)
-NC_MODE="fifo"
-if "$NC" --help 2>&1 | grep -q -- '-e'; then
-    NC_MODE="e"
+# ---- Find nc ----
+NC_BIN=""
+# Try busybox nc
+if "$BB" nc --help 2>&1 | head -1 | grep -qi "nc\|netcat"; then
+    NC_BIN="$BB nc"
 fi
-log_msg "nc mode: $NC_MODE"
+# Fallback to system nc
+if [ -z "$NC_BIN" ]; then
+    for path in /system/bin/nc /system/xbin/nc; do
+        if [ -x "$path" ]; then
+            NC_BIN="$path"
+            break
+        fi
+    done
+fi
+if [ -z "$NC_BIN" ]; then
+    NC_BIN="nc"
+fi
+log_msg "nc=$NC_BIN"
 
-# Main server loop
+# ---- Main server loop (FIFO approach) ----
+# Uses: nc -l -p PORT < FIFO | handler > FIFO
+# nc reads client request -> pipe -> handler stdin
+# handler writes response -> FIFO -> nc -> client
+log_msg "Entering server loop (FIFO mode)..."
+FIFO="/tmp/gost_webui_fifo"
+FAIL_COUNT=0
+
 while true; do
-    if [ "$NC_MODE" = "e" ]; then
-        # nc -l -p PORT -e handler (preferred - one connection per iteration)
-        "$NC" -l -p "$PORT" -e "sh $SCRIPT --handle $MODDIR" 2>>"$LOGFILE"
-    else
-        # FIFO fallback for nc without -e
-        FIFO="/tmp/gost_webui_fifo_$$"
-        rm -f "$FIFO"
-        mkfifo "$FIFO" 2>/dev/null
-        "$NC" -l -p "$PORT" < "$FIFO" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
-        rm -f "$FIFO"
+    # Recreate FIFO each iteration
+    rm -f "$FIFO"
+    mkfifo "$FIFO" 2>/dev/null
+
+    if [ ! -p "$FIFO" ]; then
+        log_msg "ERROR: mkfifo $FIFO failed"
+        sleep 2
+        continue
     fi
+
+    # Run nc with FIFO piping to handler
+    # busybox nc -l -p PORT: listen on PORT
+    "$BB" nc -l -p "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
+
+    NC_EXIT=$?
+    if [ $NC_EXIT -ne 0 ]; then
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        log_msg "WARNING: nc exited with code $NC_EXIT (fail count: $FAIL_COUNT)"
+        if [ $FAIL_COUNT -ge 5 ]; then
+            log_msg "ERROR: Too many failures, trying nc -l syntax..."
+            # Fallback: some nc versions use -l without -p
+            rm -f "$FIFO"
+            mkfifo "$FIFO" 2>/dev/null
+            "$BB" nc -l "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
+            NC_EXIT=$?
+            if [ $NC_EXIT -ne 0 ]; then
+                log_msg "ERROR: nc -l also failed (code $NC_EXIT). Resetting fail count."
+                FAIL_COUNT=0
+            else
+                log_msg "nc -l syntax works! Continuing with this syntax."
+                FAIL_COUNT=0
+                # Switch to -l syntax for subsequent iterations
+                while true; do
+                    rm -f "$FIFO"
+                    mkfifo "$FIFO" 2>/dev/null
+                    [ ! -p "$FIFO" ] && { sleep 2; continue; }
+                    "$BB" nc -l "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
+                    sleep 1
+                done
+            fi
+        fi
+    else
+        FAIL_COUNT=0
+    fi
+
+    # Brief pause between connections
+    sleep 1
 done

@@ -95,7 +95,7 @@ gost-magisk-module/
 │   └── config.sh         # 配置读写
 └── webui/                # Web 管理界面
     ├── server.sh         # 纯 shell HTTP 后端（无需 Python）
-    ├── server.py         # Python 后端（可选备用）
+    ├── server.sh         # 纯 Shell 后端（无需 Python）
     ├── index.html        # 前端页面
     ├── app.js            # 前端逻辑
     └── style.css         # 样式
