@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gost Proxy Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">Gost Proxy</h1>
+                <span class="status-badge" id="globalStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Loading</span>
+                </span>
+            </div>
+            <div class="header-right">
+                <span class="arch-badge" id="archBadge"></span>
+            </div>
+        </header>
+
+        <nav class="nav">
+            <button class="nav-btn active" data-page="dashboard">Dashboard</button>
+            <button class="nav-btn" data-page="proxy">Proxy</button>
+            <button class="nav-btn" data-page="advanced">Advanced</button>
+            <button class="nav-btn" data-page="logs">Logs</button>
+        </nav>
+
+        <main class="main">
+            <section class="page active" id="page-dashboard">
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Status</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-row">
+                                <span class="info-label">Gost</span>
+                                <span class="info-value" id="dashGostStatus">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">PID</span>
+                                <span class="info-value" id="dashGostPid">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">WebUI</span>
+                                <span class="info-value" id="dashWebuiStatus">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Configuration</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-row">
+                                <span class="info-label">Proxy Type</span>
+                                <span class="info-value" id="dashProxyType">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Listen</span>
+                                <span class="info-value" id="dashListenAddr">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Port</span>
+                                <span class="info-value" id="dashListenPort">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>System</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-row">
+                                <span class="info-label">Architecture</span>
+                                <span class="info-value" id="dashArch">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">WebUI Port</span>
+                                <span class="info-value" id="dashWebuiPort">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="control-bar">
+                    <button class="btn btn-start" id="btnStart">Start</button>
+                    <button class="btn btn-stop" id="btnStop">Stop</button>
+                    <button class="btn btn-restart" id="btnRestart">Restart</button>
+                </div>
+                <div class="card" style="margin-top:16px">
+                    <div class="card-header"><h3>Gost Command</h3></div>
+                    <div class="card-body">
+                        <code class="command-preview" id="commandPreview">-</code>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page" id="page-proxy">
+                <div class="card">
+                    <div class="card-header"><h3>Proxy Type</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Type</label>
+                            <select class="form-select" id="proxyType">
+                                <option value="http">HTTP Proxy</option>
+                                <option value="socks5">SOCKS5 Proxy</option>
+                                <option value="ss">Shadowsocks</option>
+                                <option value="tls">TLS Tunnel</option>
+                                <option value="ws">WebSocket Tunnel</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Listen Address</label>
+                            <input type="text" class="form-input" id="listenAddr" value="0.0.0.0" placeholder="0.0.0.0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Listen Port</label>
+                            <input type="number" class="form-input" id="listenPort" value="1080" min="1" max="65535">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="authCard">
+                    <div class="card-header">
+                        <h3>Authentication</h3>
+                        <label class="toggle">
+                            <input type="checkbox" id="authEnabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="card-body" id="authFields" style="display:none">
+                        <div class="form-group">
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-input" id="authUsername" placeholder="username">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-input" id="authPassword" placeholder="password">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="ssCard" style="display:none">
+                    <div class="card-header"><h3>Shadowsocks</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Encrypt Method</label>
+                            <select class="form-select" id="ssMethod">
+                                <option value="aes-256-cfb">AES-256-CFB</option>
+                                <option value="aes-128-cfb">AES-128-CFB</option>
+                                <option value="aes-256-ctr">AES-256-CTR</option>
+                                <option value="aes-128-ctr">AES-128-CTR</option>
+                                <option value="chacha20-ietf">ChaCha20-IETF</option>
+                                <option value="rc4-md5">RC4-MD5</option>
+                                <option value="aes-256-gcm">AES-256-GCM</option>
+                                <option value="aes-128-gcm">AES-128-GCM</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-input" id="ssPassword" placeholder="shadowsocks password">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="tlsCard" style="display:none">
+                    <div class="card-header"><h3>TLS</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Certificate Path</label>
+                            <input type="text" class="form-input" id="tlsCert" placeholder="/path/to/cert.pem">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Key Path</label>
+                            <input type="text" class="form-input" id="tlsKey" placeholder="/path/to/key.pem">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">CA Path</label>
+                            <input type="text" class="form-input" id="tlsCa" placeholder="/path/to/ca.pem">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="wsCard" style="display:none">
+                    <div class="card-header"><h3>WebSocket</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">WS Path</label>
+                            <input type="text" class="form-input" id="wsPath" value="/ws" placeholder="/ws">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">WS Host</label>
+                            <input type="text" class="form-input" id="wsHost" placeholder="example.com">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="upstreamCard">
+                    <div class="card-header">
+                        <h3>Upstream Proxy</h3>
+                        <label class="toggle">
+                            <input type="checkbox" id="upstreamEnabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="card-body" id="upstreamFields" style="display:none">
+                        <div class="form-group">
+                            <label class="form-label">Type</label>
+                            <select class="form-select" id="upstreamType">
+                                <option value="http">HTTP</option>
+                                <option value="socks5">SOCKS5</option>
+                                <option value="ss">Shadowsocks</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Address</label>
+                            <input type="text" class="form-input" id="upstreamAddr" placeholder="proxy.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Port</label>
+                            <input type="number" class="form-input" id="upstreamPort" min="1" max="65535">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-input" id="upstreamUsername" placeholder="(optional)">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-input" id="upstreamPassword" placeholder="(optional)">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Transport</label>
+                            <select class="form-select" id="upstreamRoute">
+                                <option value="">Direct</option>
+                                <option value="ws">WebSocket</option>
+                                <option value="wss">WebSocket+TLS</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="upstreamWsPathGroup" style="display:none">
+                            <label class="form-label">WS Path</label>
+                            <input type="text" class="form-input" id="upstreamWsPath" placeholder="/gost">
+                        </div>
+                        <div class="form-group" id="upstreamWsHostGroup" style="display:none">
+                            <label class="form-label">WS Host</label>
+                            <input type="text" class="form-input" id="upstreamWsHost" placeholder="example.com">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="importLinkCard">
+                    <div class="card-header"><h3>Import Link</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <input type="text" class="form-input" id="importLinkInput" placeholder="粘贴代理链接，如 socks://...">
+                        </div>
+                        <button class="btn btn-primary" id="btnImportLink">Import Link</button>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" id="btnSaveConfig">Save Config</button>
+                    <button class="btn btn-secondary" id="btnExportConfig">Export</button>
+                    <button class="btn btn-secondary" id="btnImportConfig">Import</button>
+                    <input type="file" id="importFileInput" accept=".json" style="display:none">
+                </div>
+            </section>
+
+            <section class="page" id="page-advanced">
+                <div class="card">
+                    <div class="card-header"><h3>DNS</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">DNS Servers</label>
+                            <input type="text" class="form-input" id="advDns" placeholder="8.8.8.8,8.8.4.4">
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Logging</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Log Level</label>
+                            <select class="form-select" id="advLogLevel">
+                                <option value="debug">Debug</option>
+                                <option value="info" selected>Info</option>
+                                <option value="warn">Warn</option>
+                                <option value="error">Error</option>
+                                <option value="fatal">Fatal</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>WebUI</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">WebUI Port</label>
+                            <input type="number" class="form-input" id="advWebuiPort" value="8080" min="1" max="65535">
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Multi-Port Listen</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Additional Listen Ports (comma separated)</label>
+                            <input type="text" class="form-input" id="advMultiListen" placeholder="1081,1082">
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>Routes</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">Route Rules (JSON array)</label>
+                            <textarea class="form-textarea" id="advRoutes" rows="4" placeholder='[{"serve": "tcp://:0", "chain": "chain-0"}]'></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="action-bar">
+                    <button class="btn btn-primary" id="btnSaveAdvanced">Save Advanced Config</button>
+                </div>
+            </section>
+
+            <section class="page" id="page-logs">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Gost Logs</h3>
+                        <div class="log-controls">
+                            <button class="btn btn-sm btn-secondary" id="btnRefreshLogs">Refresh</button>
+                            <label class="toggle toggle-sm">
+                                <input type="checkbox" id="logAutoRefresh" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">Auto</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <pre class="log-view" id="logView">Loading logs...</pre>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

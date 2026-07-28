@@ -1,0 +1,6 @@
+id=gost_proxy
+name=Gost Proxy Module
+version=v1.0.0
+versionCode=10000
+author=gost-magisk
+description=Run gost proxy with web UI configuration
