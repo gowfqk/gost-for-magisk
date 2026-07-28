@@ -178,7 +178,7 @@ if [ "$1" = "--handle" ]; then
             else
                 LOGS="No logs available."
             fi
-            LOGS_ESCAPED=$(printf '%s' "$LOGS" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' '\f' | sed 's/\f/\\n/g')
+            LOGS_ESCAPED=$(printf '%s' "$LOGS" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')
             send_json "{\"logs\":\"$LOGS_ESCAPED\"}"
             ;;
 
