@@ -4,3 +4,5 @@ __pycache__/
 logs/
 *.log
 .DS_Store
+# gost binary is downloaded via scripts/download_gost.sh
+gost/gost

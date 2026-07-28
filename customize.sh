@@ -45,12 +45,35 @@ mkdir -p "$MODDIR/logs"
 ui_print "Extracting module files..."
 unzip -o "$ZIPFILE" -d "$MODDIR" >/dev/null 2>&1
 
-if [ ! -f "$MODDIR/gost/gost" ]; then
+if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
     ui_print ""
-    ui_print "WARNING: gost binary not found!"
-    ui_print "Please place the gost binary for $GOST_ARCH in gost/gost/"
-    ui_print "before installing this module."
+    ui_print "gost binary not found or is placeholder."
+    ui_print "Attempting automatic download..."
     ui_print ""
+    if [ -f "$MODDIR/scripts/download_gost.sh" ]; then
+        chmod 755 "$MODDIR/scripts/download_gost.sh"
+        sh "$MODDIR/scripts/download_gost.sh" "$MODDIR/gost" 2>&1 | while read -r line; do
+            ui_print "$line"
+        done
+        if [ -f "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+            ui_print ""
+            ui_print "gost binary downloaded successfully!"
+        else
+            ui_print ""
+            ui_print "WARNING: Auto-download failed!"
+            ui_print "Please manually download from:"
+            ui_print "  https://github.com/go-gost/gost/releases"
+            ui_print "Place the binary at: gost/gost"
+        fi
+    else
+        ui_print "WARNING: download_gost.sh not found"
+        ui_print "Please manually download gost binary for $GOST_ARCH"
+        ui_print "from: https://github.com/go-gost/gost/releases"
+        ui_print "Place at: gost/gost"
+    fi
+    ui_print ""
+else
+    ui_print "gost binary found, skipping download."
 fi
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null
@@ -58,6 +81,7 @@ chmod 755 "$MODDIR/scripts/start.sh"
 chmod 755 "$MODDIR/scripts/stop.sh"
 chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
+chmod 755 "$MODDIR/scripts/download_gost.sh"
 chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"
