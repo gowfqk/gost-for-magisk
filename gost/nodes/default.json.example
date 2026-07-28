@@ -9,12 +9,12 @@
         "password": ""
     },
     "upstream": {
-        "enabled": true,
+        "enabled": false,
         "type": "socks5+wss",
-        "addr": "t-hkbn75-1002.ci-lab.com",
+        "addr": "",
         "port": 80,
-        "username": "pro",
-        "password": "u2025887:3de79113-832d-436c-a2c6-dcf62f0be38e",
+        "username": "",
+        "password": "",
         "route": "",
         "ws_path": "/gost",
         "ws_host": ""

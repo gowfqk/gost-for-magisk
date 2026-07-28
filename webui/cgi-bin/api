@@ -277,7 +277,16 @@ case "$ENDPOINT" in
             if [ -n "$UP_USER" ]; then
                 UP_AUTH="${UP_USER}:${UP_PASS}@"
             fi
-            CMD="${CMD} -F ${UP_TYPE}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
+            # Don't append +ws if type already contains ws/wss
+            UP_SCHEME="$UP_TYPE"
+            case "$UP_TYPE" in
+                *+ws*|*+wss*) ;;
+                *)
+                    UP_WS=$(jsection_val upstream ws_path)
+                    [ -n "$UP_WS" ] && UP_SCHEME="${UP_SCHEME}+ws"
+                    ;;
+            esac
+            CMD="${CMD} -F ${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
             UP_WS=$(jsection_val upstream ws_path)
             if [ -n "$UP_WS" ]; then
                 CMD="${CMD}?path=${UP_WS}"

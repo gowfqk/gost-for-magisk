@@ -112,6 +112,14 @@ rm -rf "$PRESERVE_DIR"
 # ---- Ensure nodes directory exists ----
 mkdir -p "$MODDIR/gost/nodes"
 
+# ---- Ensure config.json exists ----
+if [ ! -f "$MODDIR/gost/config.json" ]; then
+    if [ -f "$MODDIR/gost/nodes/default.json.example" ]; then
+        cp "$MODDIR/gost/nodes/default.json.example" "$MODDIR/gost/config.json"
+        ui_print "- Created default config from template."
+    fi
+fi
+
 # ---- Handle gost binary ----
 if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
     ui_print ""

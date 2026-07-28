@@ -7,6 +7,9 @@ logs/
 # gost binary is downloaded via scripts/download_gost.sh
 gost/gost
 gost/active
+# Node configs and active config may contain credentials - don't track in git
 gost/nodes/*
-!gost/nodes/default.json
+gost/config.json
+# Keep example templates in git
+!gost/nodes/default.json.example
 gost-proxy-*.zip

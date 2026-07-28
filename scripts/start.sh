@@ -41,14 +41,14 @@ fi
 # ---- Parse config and build gost command line ----
 # Helper: extract JSON value (simple, handles top-level string/number/bool)
 jval() {
-    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+    grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
 }
 
 # Helper: extract nested JSON value from a section
 # Usage: jsection_val "auth" "enabled"
 jsection_val() {
     _section="$1" _key="$2"
-    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"'
+    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^,}]*" | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
 }
 
 PROXY_TYPE=$(jval proxy_type)
@@ -119,6 +119,7 @@ log_msg "Listen URL: $LISTEN_URL"
 
 # ---- Build the -F (forward/upstream) argument ----
 UPSTREAM_ENABLED=$(jsection_val upstream enabled)
+log_msg "Debug: upstream.enabled raw = [$UPSTREAM_ENABLED]"
 FORWARD_ARG=""
 
 if [ "$UPSTREAM_ENABLED" = "true" ]; then
@@ -128,23 +129,37 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
     UP_PORT=$(jsection_val upstream port)
     UP_USER=$(jsection_val upstream username)
     UP_PASS=$(jsection_val upstream password)
+    UP_WS_PATH=$(jsection_val upstream ws_path)
+    UP_WS_HOST=$(jsection_val upstream ws_host)
 
-    if [ -n "$UP_ADDR" ] && [ -n "$UP_PORT" ]; then
+    log_msg "Debug: upstream type=$UP_TYPE addr=$UP_ADDR port=$UP_PORT user=$UP_USER ws_path=$UP_WS_PATH"
+
+    if [ -n "$UP_ADDR" ] && [ -n "$UP_PORT" ] && [ "$UP_PORT" != "0" ]; then
         UP_AUTH=""
         if [ -n "$UP_USER" ]; then
             UP_AUTH="${UP_USER}:${UP_PASS}@"
         fi
 
-        # Check upstream TLS/WS
+        # Use the upstream type directly as the scheme.
+        # Do NOT append +ws if the type already contains ws or wss
+        # (e.g. "socks5+wss" already includes WebSocket over TLS)
         UP_SCHEME="$UP_TYPE"
-        UP_WS_PATH=$(jsection_val upstream ws_path)
-        [ -n "$UP_WS_PATH" ] && UP_SCHEME="${UP_SCHEME}+ws"
+        case "$UP_TYPE" in
+            *+ws*|*+wss*)
+                # Type already includes ws/wss, don't append
+                ;;
+            *)
+                # Type doesn't include ws, check if ws_path is set
+                if [ -n "$UP_WS_PATH" ]; then
+                    UP_SCHEME="${UP_SCHEME}+ws"
+                fi
+                ;;
+        esac
 
         FORWARD_URL="${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
 
-        # Append WS params
+        # Append WS query params if ws_path is set
         if [ -n "$UP_WS_PATH" ]; then
-            UP_WS_HOST=$(jsection_val upstream ws_host)
             UP_QUERY="?path=${UP_WS_PATH}"
             [ -n "$UP_WS_HOST" ] && UP_QUERY="${UP_QUERY}&host=${UP_WS_HOST}"
             FORWARD_URL="${FORWARD_URL}${UP_QUERY}"
@@ -152,7 +167,11 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
 
         FORWARD_ARG="-F $FORWARD_URL"
         log_msg "Forward URL: $FORWARD_URL"
+    else
+        log_msg "WARNING: upstream enabled but addr or port is empty/zero (addr=$UP_ADDR port=$UP_PORT)"
     fi
+else
+    log_msg "Debug: upstream not enabled, skipping -F"
 fi
 
 # ---- Start gost ----
