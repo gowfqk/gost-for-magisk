@@ -27,6 +27,7 @@ fi
 
 pkill -f "gost" 2>/dev/null
 pkill -f "server.py.*gost" 2>/dev/null
+pkill -f "server.sh.*gost" 2>/dev/null
 
 rm -f /tmp/gost.pid
 rm -f /tmp/gost-webui.pid

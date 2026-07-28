@@ -5,7 +5,7 @@
 ## 功能特性
 
 - 🚀 **开机自启** - 通过 Magisk service.sh 自动启动 gost 代理和 WebUI
-- 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等）
+- 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等），纯 shell 后端无需 Python
 - 📦 **自动下载二进制** - 安装时自动检测架构并下载对应 gost 二进制，国内网络自动使用加速镜像
 - 🔀 **多代理协议** - 支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
 - 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
@@ -94,7 +94,8 @@ gost-magisk-module/
 │   ├── status.sh         # 状态
 │   └── config.sh         # 配置读写
 └── webui/                # Web 管理界面
-    ├── server.py         # Python 后端
+    ├── server.sh         # 纯 shell HTTP 后端（无需 Python）
+    ├── server.py         # Python 后端（可选备用）
     ├── index.html        # 前端页面
     ├── app.js            # 前端逻辑
     └── style.css         # 样式
