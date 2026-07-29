@@ -7,6 +7,8 @@ mkdir -p "$MODDIR/logs"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] uninstall.sh started" >> "$LOGFILE"
 
+[ -f "$MODDIR/scripts/iptables.sh" ] && sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1
+
 if [ -f /tmp/gost.pid ]; then
     GOST_PID=$(cat /tmp/gost.pid)
     if kill -0 "$GOST_PID" 2>/dev/null; then

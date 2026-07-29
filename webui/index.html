@@ -110,13 +110,10 @@
                     <div class="card-body">
                         <div class="form-group">
                             <label class="form-label" data-i18n="type">Type</label>
-                            <select class="form-select" id="proxyType">
-                                <option value="http" data-i18n="http_proxy">HTTP Proxy</option>
-                                <option value="socks5" data-i18n="socks5_proxy">SOCKS5 Proxy</option>
-                                <option value="ss" data-i18n="shadowsocks">Shadowsocks</option>
-                                <option value="tls" data-i18n="tls_tunnel">TLS Tunnel</option>
-                                <option value="ws" data-i18n="ws_tunnel">WebSocket Tunnel</option>
+                            <select class="form-select" id="proxyType" disabled>
+                                <option value="redirect" selected>Transparent Proxy (TCP)</option>
                             </select>
+                            <p class="text-muted">Local TCP traffic is captured automatically with iptables; apps do not need SOCKS settings.</p>
                         </div>
                         <div class="form-group">
                             <label class="form-label" data-i18n="listen_addr">Listen Address</label>
@@ -129,7 +126,7 @@
                     </div>
                 </div>
 
-                <div class="card" id="authCard">
+                <div class="card" id="authCard" style="display:none">
                     <div class="card-header">
                         <h3 data-i18n="authentication">Authentication</h3>
                         <label class="toggle">
@@ -318,6 +315,7 @@
                         <div class="form-group">
                             <label class="form-label" data-i18n="log_level">Log Level</label>
                             <select class="form-select" id="advLogLevel">
+                                <option value="trace">Trace</option>
                                 <option value="debug">Debug</option>
                                 <option value="info" selected>Info</option>
                             </select>

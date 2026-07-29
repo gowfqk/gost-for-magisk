@@ -154,6 +154,7 @@ fi
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null
 chmod 755 "$MODDIR/scripts/start.sh"
+chmod 755 "$MODDIR/scripts/iptables.sh"
 chmod 755 "$MODDIR/scripts/stop.sh"
 chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/config.sh"

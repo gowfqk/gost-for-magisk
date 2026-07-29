@@ -33,10 +33,9 @@ fi
 ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
 
 LISTEN_PORT=""
-PROXY_TYPE=""
+PROXY_TYPE="redirect"
 if [ -f "$CONFIG" ]; then
     LISTEN_PORT=$(grep -o '"listen_port":[[:space:]]*[0-9]*' "$CONFIG" | grep -o '[0-9]*')
-    PROXY_TYPE=$(grep -o '"proxy_type":[[:space:]]*"[^"]*"' "$CONFIG" | grep -o '"[^"]*"' | tr -d '"')
 fi
 
 echo "{"

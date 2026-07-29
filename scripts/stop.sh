@@ -6,6 +6,9 @@ PIDFILE="/tmp/gost.pid"
 
 mkdir -p "$MODDIR/logs"
 
+# Remove traffic interception before stopping gost to avoid breaking networking.
+[ -f "$MODDIR/scripts/iptables.sh" ] && sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1
+
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
 }

@@ -127,8 +127,9 @@ jsection_val() {
     ' "$CONFIG" 2>/dev/null
 }
 
-PROXY_TYPE=$(jval proxy_type)
-[ -z "$PROXY_TYPE" ] && PROXY_TYPE="http"
+# Local traffic is always captured by a transparent REDIRECT listener.
+# The upstream protocol remains configurable and may still be HTTP/SOCKS/SS.
+PROXY_TYPE="redirect"
 
 LISTEN_ADDR=$(jval listen_addr)
 [ -z "$LISTEN_ADDR" ] && LISTEN_ADDR="0.0.0.0"
@@ -166,6 +167,9 @@ fi
 
 # Map proxy_type to gost scheme
 case "$PROXY_TYPE" in
+    redirect|red|redir)
+        SCHEME="red"
+        ;;
     http|socks5|socks4|relay)
         SCHEME="$PROXY_TYPE"
         ;;
@@ -188,20 +192,25 @@ if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
     TLS_CERT=$(jsection_val tls cert)
     TLS_KEY=$(jsection_val tls key)
     TLS_CA=$(jsection_val tls ca)
+    TLS_ENABLED=false
     if [ "$PROXY_TYPE" = "tls" ] || [ -n "$TLS_CERT" ]; then
+        TLS_ENABLED=true
         SCHEME="http+tls"
     fi
 
     # Enable WebSocket only for the explicit ws proxy type or when a path is
-    # configured. Fresh installs keep the path empty.
+    # configured. Use wss when TLS credentials are also configured.
     WS_PATH=$(jsection_val websocket path)
     if [ "$PROXY_TYPE" = "ws" ]; then
-        SCHEME="http+ws"
         [ -z "$WS_PATH" ] && WS_PATH="/ws"
+        if [ "$TLS_ENABLED" = "true" ]; then SCHEME="http+wss"; else SCHEME="http+ws"; fi
     elif [ -n "$WS_PATH" ]; then
-        SCHEME="${SCHEME}+ws"
+        if [ "$TLS_ENABLED" = "true" ]; then SCHEME="http+wss"; else SCHEME="${SCHEME}+ws"; fi
     fi
 
+    if [ "$SCHEME" = "red" ]; then
+        AUTH_PART=""
+    fi
     LISTEN_URL="${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${LISTEN_PORT}"
 
     QUERY=""
@@ -217,6 +226,16 @@ if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
     append_query certFile "$TLS_CERT"
     append_query keyFile "$TLS_KEY"
     append_query caFile "$TLS_CA"
+    if [ "$SCHEME" = "red" ]; then
+        QUERY=""
+        TRANSPARENT_SNIFFING=$(jsection_val transparent sniffing)
+        TRANSPARENT_MARK=$(jsection_val transparent mark)
+        [ "$TRANSPARENT_SNIFFING" != "false" ] && append_query sniffing true
+        case "$TRANSPARENT_MARK" in
+            ''|*[!0-9]*) TRANSPARENT_MARK=100 ;;
+        esac
+        append_query so_mark "$TRANSPARENT_MARK"
+    fi
     LISTEN_URL="${LISTEN_URL}${QUERY}"
 fi
 
@@ -291,7 +310,12 @@ for EXTRA_PORT in $MULTI_LISTEN; do
         ''|*[!0-9]*) continue ;;
     esac
     if [ "$EXTRA_PORT" -ge 1 ] 2>/dev/null && [ "$EXTRA_PORT" -le 65535 ] 2>/dev/null; then
-        set -- "$@" -L "${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${EXTRA_PORT}"
+        if [ "$PROXY_TYPE" = "ss" ] || [ "$PROXY_TYPE" = "shadowsocks" ]; then
+            EXTRA_URL="${SCHEME}://$(urlencode "$SS_METHOD"):$(urlencode "$SS_PASS")@${LISTEN_ADDR}:${EXTRA_PORT}"
+        else
+            EXTRA_URL="${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${EXTRA_PORT}${QUERY}"
+        fi
+        set -- "$@" -L "$EXTRA_URL"
     fi
 done
 IFS=$OLD_IFS
@@ -319,8 +343,15 @@ sleep 2
 
 if kill -0 "$GOST_PID" 2>/dev/null; then
     echo "$GOST_PID" > "$PIDFILE"
-    log_msg "gost started successfully (PID: $GOST_PID)"
-    echo "gost started successfully (PID: $GOST_PID)"
+    if ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" start; then
+        log_msg "ERROR: failed to install transparent proxy rules"
+        kill "$GOST_PID" 2>/dev/null
+        rm -f "$PIDFILE"
+        echo "ERROR: failed to install transparent proxy rules"
+        exit 1
+    fi
+    log_msg "gost transparent proxy started successfully (PID: $GOST_PID)"
+    echo "gost transparent proxy started successfully (PID: $GOST_PID)"
 else
     log_msg "ERROR: gost failed to start - check config"
     echo "ERROR: gost failed to start"

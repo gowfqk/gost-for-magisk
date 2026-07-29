@@ -1,13 +1,13 @@
 # Gost Proxy Magisk Module
 
-在 Android 设备上通过 Magisk 运行 [gost](https://github.com/go-gost/gost) 代理，配备 WebUI 管理界面。
+在 Android 设备上通过 Magisk 运行 [gost](https://github.com/go-gost/gost) TCP 透明代理，配备 WebUI 管理界面。应用无需单独配置 SOCKS/HTTP 代理。
 
 ## 功能特性
 
 - 🚀 **开机自启** - 通过 Magisk service.sh 自动启动 gost 代理和 WebUI
 - 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等），纯 shell 后端无需 Python
 - 📦 **自动下载二进制** - 安装时自动检测架构并下载对应 gost 二进制，国内网络自动使用加速镜像
-- 🔀 **多代理协议** - 支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
+- 🔀 **透明代理** - 使用 gost `red` 监听器和 iptables 自动接管本机 TCP 流量；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
 - 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
 - 🛡️ **完整生命周期管理** - 启动 / 停止 / 重启 / 状态查询 / 日志查看
 
@@ -70,6 +70,10 @@ sh /data/adb/modules/gost_proxy/scripts/download_gost.sh
 ## 配置
 
 配置文件位于 `gost/config.json`，可通过 WebUI 或直接编辑修改。
+
+本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables` OUTPUT 规则。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
+
+注意：当前实现仅透明代理 TCP；UDP 不会被接管。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量也会直连。
 
 ## 卸载
 

@@ -32,14 +32,25 @@ for pair in $(echo "$Q" | tr '&' ' ' 2>/dev/null); do
     case "$key" in
         endpoint) ENDPOINT="$val" ;;
         lines)    LINES="$val" ;;
-        name)     QUERY_NAME="$val" ;;
     esac
 done
 
 # ---- Read POST body ----
 BODY=""
+MAX_BODY_SIZE=65536
 if [ "$REQUEST_METHOD" = "POST" ] && [ -n "$CONTENT_LENGTH" ]; then
-    if [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
+    case "$CONTENT_LENGTH" in
+        ''|*[!0-9]*) CONTENT_LENGTH=0 ;;
+    esac
+    if [ "$CONTENT_LENGTH" -gt "$MAX_BODY_SIZE" ] 2>/dev/null; then
+        json_header() {
+            printf 'Content-Type: application/json; charset=utf-8\r\n'
+            printf 'Cache-Control: no-store\r\n\r\n'
+        }
+        json_header
+        printf '{"success":false,"message":"Request body too large"}'
+        exit 0
+    elif [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
         BODY=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
     fi
 fi
@@ -106,6 +117,7 @@ write_config() {
 
     _listen_port=$(printf '%s' "$_data" | grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
     _webui_port=$(printf '%s' "$_data" | grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
+    _data=$(printf '%s' "$_data" | sed 's/"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"/"proxy_type": "redirect"/')
     [ -n "$_listen_port" ] && [ "$_listen_port" -ge 1 ] 2>/dev/null && [ "$_listen_port" -le 65535 ] 2>/dev/null || return 1
     [ -z "$_webui_port" ] || { [ "$_webui_port" -ge 1 ] 2>/dev/null && [ "$_webui_port" -le 65535 ] 2>/dev/null; } || return 1
 
@@ -139,7 +151,7 @@ case "$ENDPOINT" in
         fi
         ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
-        PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+        PT="redirect"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         WP=$(jval webui_port);  [ -z "$WP" ] && WP="8080"
         ACTIVE_NODE=$(get_active_node)
@@ -222,43 +234,6 @@ case "$ENDPOINT" in
         fi
         ;;
 
-    nodes/get)
-        NODE_NAME="${QUERY_NAME:-$(extract_json_name)}"
-        if ! valid_node_name "$NODE_NAME"; then
-            json_header
-            printf '{"success":false,"message":"Invalid node name"}'
-        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
-            json_header
-            printf '{"success":false,"message":"Node not found"}'
-        else
-            printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'
-            cat "$NODES_DIR/${NODE_NAME}.json"
-        fi
-        ;;
-
-    nodes/update)
-        NODE_NAME=$(extract_json_name)
-        NODE_CONFIG=$(printf '%s' "$BODY" | sed 's/^[^{]*"config"[[:space:]]*:[[:space:]]*//; s/}[[:space:]]*$//')
-        if ! valid_node_name "$NODE_NAME"; then
-            json_header
-            printf '{"success":false,"message":"Invalid node name"}'
-        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
-            json_header
-            printf '{"success":false,"message":"Node not found"}'
-        elif [ -z "$NODE_CONFIG" ]; then
-            json_header
-            printf '{"success":false,"message":"Invalid config"}'
-        else
-            _tmp="$NODES_DIR/${NODE_NAME}.json.tmp.$$"
-            printf '%s' "$NODE_CONFIG" > "$_tmp" && mv -f "$_tmp" "$NODES_DIR/${NODE_NAME}.json"
-            if [ "$NODE_NAME" = "$(get_active_node)" ]; then
-                cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
-            fi
-            json_header
-            printf '{"success":true,"message":"Node updated","name":"%s"}' "$NODE_NAME"
-        fi
-        ;;
-
     nodes/switch)
         NODE_NAME=$(extract_json_name)
         if [ -z "$NODE_NAME" ]; then
@@ -336,7 +311,11 @@ case "$ENDPOINT" in
         ;;
 
     logs)
-        [ -z "$LINES" ] && LINES=200
+        case "$LINES" in
+            ''|*[!0-9]*) LINES=200 ;;
+        esac
+        [ "$LINES" -gt 1000 ] 2>/dev/null && LINES=1000
+        [ "$LINES" -lt 1 ] 2>/dev/null && LINES=1
         if [ -f "$LOG_PATH" ]; then
             LOGS=$(tail -n "$LINES" "$LOG_PATH" 2>/dev/null)
         else
@@ -348,7 +327,7 @@ case "$ENDPOINT" in
         ;;
 
     command)
-        PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+        PT="redirect"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
         # Build full command preview
@@ -359,10 +338,9 @@ case "$ENDPOINT" in
             UP_ADDR=$(jsection_val upstream addr)
             UP_PORT=$(jsection_val upstream port)
             UP_USER=$(jsection_val upstream username)
-            UP_PASS=$(jsection_val upstream password)
             UP_AUTH=""
             if [ -n "$UP_USER" ]; then
-                UP_AUTH="${UP_USER}:${UP_PASS}@"
+                UP_AUTH="${UP_USER}:***@"
             fi
             # Don't append +ws if type already contains ws/wss
             UP_SCHEME="$UP_TYPE"
@@ -379,19 +357,19 @@ case "$ENDPOINT" in
                 CMD="${CMD}?path=${UP_WS}"
             fi
         fi
+        CMD_ESCAPED=$(printf '%s' "$CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
         json_header
-        printf '{"command":"%s"}' "$CMD"
+        printf '{"command":"%s"}' "$CMD_ESCAPED"
         ;;
 
     config/import)
-        if [ -n "$BODY" ]; then
-            printf '%s' "$BODY" > "$CONFIG"
+        if write_config "$BODY"; then
             sync_active_node
             json_header
             printf '{"success":true,"message":"Config imported"}'
         else
             json_header
-            printf '{"success":false,"message":"Empty body"}'
+            printf '{"success":false,"message":"Invalid config"}'
         fi
         ;;
 

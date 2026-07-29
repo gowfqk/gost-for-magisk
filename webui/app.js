@@ -7,7 +7,6 @@
     var LOG_AUTO_REFRESH_MS = 2000;
     var STATUS_REFRESH_MS = 3000;
     var currentLang = "en";
-    var editingNodeName = "";
 
     // ---- i18n Dictionary ----
     var i18n = {
@@ -226,12 +225,12 @@
     }
 
     function applyConfigToForm(config) {
-        $("proxyType").value = config.proxy_type || "http";
+        $("proxyType").value = "redirect";
         $("listenAddr").value = config.listen_addr || "0.0.0.0";
         $("listenPort").value = config.listen_port || 1080;
 
         var auth = config.auth || {};
-        $("authEnabled").checked = !!auth.enabled;
+        $("authEnabled").checked = false;
         toggleAuthFields();
         $("authUsername").value = auth.username || "";
         $("authPassword").value = auth.password || "";
@@ -279,12 +278,18 @@
         }
 
         return {
-            proxy_type: $("proxyType").value,
+            proxy_type: "redirect",
             listen_addr: $("listenAddr").value,
             listen_port: parseInt($("listenPort").value, 10) || 1080,
             webui_port: parseInt($("advWebuiPort").value, 10) || 8080,
+            transparent: {
+                enabled: true,
+                sniffing: true,
+                mark: 100,
+                exclude_lan: true
+            },
             auth: {
-                enabled: $("authEnabled").checked,
+                enabled: false,
                 username: $("authUsername").value,
                 password: $("authPassword").value
             },
@@ -321,9 +326,9 @@
 
     function updateProxyTypeFields() {
         var type = $("proxyType").value;
-        $("ssCard").style.display = type === "ss" ? "" : "none";
-        $("tlsCard").style.display = type === "tls" ? "" : "none";
-        $("wsCard").style.display = type === "ws" ? "" : "none";
+        $("ssCard").style.display = "none";
+        $("tlsCard").style.display = "none";
+        $("wsCard").style.display = "none";
     }
 
     function toggleAuthFields() {
@@ -587,7 +592,10 @@
         fetchJSON("/cgi-bin/api?endpoint=config", {
             method: "POST",
             body: config
-        }).then(function () {
+        }).then(function (res) {
+            if (!res.success) {
+                throw new Error(res.message || t("save_failed"));
+            }
             return fetchJSON("/cgi-bin/api?endpoint=nodes/save", {
                 method: "POST",
                 body: { name: name }

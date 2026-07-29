@@ -1,8 +1,14 @@
 {
-    "proxy_type": "socks5",
+    "proxy_type": "redirect",
     "listen_port": 1080,
     "listen_addr": "0.0.0.0",
     "webui_port": 8080,
+    "transparent": {
+        "enabled": true,
+        "sniffing": true,
+        "mark": 100,
+        "exclude_lan": true
+    },
     "auth": {
         "enabled": false,
         "username": "",
@@ -34,9 +40,7 @@
         "host": ""
     },
     "advanced": {
-        "dns": "",
         "log_level": "info",
-        "routes": [],
         "multi_listen": []
     }
 }
