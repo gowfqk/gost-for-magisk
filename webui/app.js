@@ -410,6 +410,18 @@
         }
     }
 
+    function safeNodeName(name) {
+        var safe = String(name || "").trim()
+            .replace(/[^A-Za-z0-9._-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .replace(/\.\.+/g, ".")
+            .substring(0, 48);
+        if (!safe || safe.charAt(0) === ".") {
+            safe = "imported-" + Date.now();
+        }
+        return safe;
+    }
+
     function importProxyLink() {
         var link = $("importLinkInput").value.trim();
         if (!link) {
@@ -421,18 +433,14 @@
             showToast(t("link_parse_fail"), "error");
             return;
         }
-        var proxyType = "socks5";
-        if (parsed.scheme === "http" || parsed.scheme === "https") {
-            proxyType = "http";
-        } else if (parsed.scheme === "ss") {
-            proxyType = "ss";
-        }
-        $("proxyType").value = proxyType;
+        $("proxyType").value = "redirect";
         $("upstreamEnabled").checked = true;
         toggleUpstreamFields();
         $("upstreamType").value = "socks5";
-        if (parsed.scheme === "http" || parsed.scheme === "https") {
+        if (parsed.scheme === "http") {
             $("upstreamType").value = "http";
+        } else if (parsed.scheme === "https") {
+            $("upstreamType").value = "http+tls";
         } else if (parsed.scheme === "ss") {
             $("upstreamType").value = "ss";
         }
@@ -440,8 +448,12 @@
         $("upstreamPort").value = parsed.port;
         $("upstreamUsername").value = parsed.username;
         $("upstreamPassword").value = parsed.password;
-        if (parsed.gost && parsed.gost.route === "ws") {
-            $("upstreamRoute").value = "ws";
+        if (parsed.gost && (parsed.gost.route === "ws" || parsed.gost.route === "wss")) {
+            $("upstreamRoute").value = parsed.gost.route;
+            var currentType = $("upstreamType").value;
+            if (currentType.indexOf("+ws") === -1 && currentType.indexOf("+wss") === -1) {
+                $("upstreamType").value = currentType + "+" + parsed.gost.route;
+            }
             $("upstreamWsPath").value = parsed.gost.path || "";
             $("upstreamWsHost").value = parsed.gost.host || "";
         } else {
@@ -451,12 +463,25 @@
         }
         toggleUpstreamRouteFields();
         updateProxyTypeFields();
-        if (parsed.remarks) {
-            showToast(t("imported_remarks", {name: parsed.remarks}), "success");
-        } else {
-            showToast(t("import_success"), "success");
-        }
-        saveConfig();
+
+        // Importing a link should create a saved node, not merely overwrite the
+        // current config. Generate a filename-safe name from remarks/host.
+        var nodeName = safeNodeName(parsed.remarks || parsed.host);
+        var config = collectConfig();
+        fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeName), {
+            method: "POST",
+            body: config
+        }).then(function (res) {
+            if (!res.success) throw new Error(res.message || t("import_fail"));
+            $("importLinkInput").value = "";
+            loadConfig();
+            loadNodes();
+            loadStatus();
+            loadCommand();
+            showToast(t("imported_remarks", {name: res.name || nodeName}), "success");
+        }).catch(function (err) {
+            showToast((err && err.message) || t("import_fail"), "error");
+        });
     }
 
     function saveConfig() {
@@ -582,8 +607,9 @@
     }
 
     function saveNode() {
-        var name = $("nodeSaveName").value.trim();
-        if (!name) {
+        var rawName = $("nodeSaveName").value.trim();
+        var name = safeNodeName(rawName);
+        if (!rawName) {
             showToast(t("enter_node_name"), "error");
             return;
         }

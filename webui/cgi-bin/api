@@ -32,6 +32,7 @@ for pair in $(echo "$Q" | tr '&' ' ' 2>/dev/null); do
     case "$key" in
         endpoint) ENDPOINT="$val" ;;
         lines)    LINES="$val" ;;
+        name)     QUERY_NAME="$val" ;;
     esac
 done
 
@@ -210,6 +211,24 @@ case "$ENDPOINT" in
         NODES_JSON="${NODES_JSON}]"
         json_header
         printf '{"nodes":%s,"active":"%s"}' "$NODES_JSON" "$ACTIVE_NODE"
+        ;;
+
+    nodes/import)
+        NODE_NAME="$QUERY_NAME"
+        if ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
+        elif [ -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node already exists"}'
+        elif write_config "$BODY"; then
+            cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json" && echo "$NODE_NAME" > "$ACTIVE_FILE"
+            json_header
+            printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
+        else
+            json_header
+            printf '{"success":false,"message":"Invalid config"}'
+        fi
         ;;
 
     nodes/save)
