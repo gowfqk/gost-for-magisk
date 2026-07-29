@@ -79,12 +79,14 @@ fetch_one "$TMP_DIR/Country.mmdb" "$MMDB_URL" "4ec13992731853fe3815a5e66cdc79be6
     -list cn,private -format quantumultx -output "$TMP_DIR/cidrs.qx" >/dev/null 2>&1 || {
     rm -rf "$TMP_DIR"; echo "geoview geoip conversion failed" >&2; exit 1; }
 
-# GOST: bare domains are exact matches; `.example.com` includes subdomains.
-# Keyword and regexp rules cannot be translated faithfully and are omitted.
+# GOST has no keyword/substring matcher. Translating `host-keyword,apple`
+# into `.apple` would be incorrect: it misses apple.com and changes the rule.
+# Keep only exact and suffix rules, and report omitted keyword rules explicitly.
 awk -F ',' '
     $1 == "host" && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2 }
     $1 == "host-suffix" && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); sub(/^\./, "", $2); print "." $2 }
 ' "$TMP_DIR/domains.qx" | sort -u > "$TMP_DIR/direct-domains.txt"
+keyword_count=$(awk -F ',' '$1 == "host-keyword" && $2 != "" { count++ } END { print count + 0 }' "$TMP_DIR/domains.qx")
 awk -F ',' '
     ($1 == "ip-cidr" || $1 == "ip6-cidr") && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2 }
 ' "$TMP_DIR/cidrs.qx" | sort -u > "$TMP_DIR/direct-cidrs.txt"
@@ -93,10 +95,15 @@ cat "$TMP_DIR/direct-domains.txt" "$TMP_DIR/direct-cidrs.txt" > "$TMP_DIR/direct
 domain_count=$(wc -l < "$TMP_DIR/direct-domains.txt")
 cidr_count=$(wc -l < "$TMP_DIR/direct-cidrs.txt")
 rule_count=$((domain_count + cidr_count))
+if [ "$rule_count" -eq 0 ]; then
+    rm -rf "$TMP_DIR"
+    echo "geodata conversion produced no usable rules" >&2
+    exit 1
+fi
 now=$(date '+%Y-%m-%dT%H:%M:%S%z')
 
-printf '{"success":true,"updated_at":"%s","geosite_tag":"%s","geoip_tag":"%s","geoview":"%s","domain_rules":%s,"cidr_rules":%s,"rules":%s,"skipped_types":"keyword,regexp"}\n' \
-    "$now" "$GEOSITE_TAG" "$GEOIP_TAG" "$GEOVIEW_TAG" "$domain_count" "$cidr_count" "$rule_count" > "$TMP_DIR/status.json"
+printf '{"success":true,"updated_at":"%s","geosite_tag":"%s","geoip_tag":"%s","geoview":"%s","domain_rules":%s,"cidr_rules":%s,"keyword_rules_skipped":%s,"rules":%s,"skipped_types":"keyword,regexp"}\n' \
+    "$now" "$GEOSITE_TAG" "$GEOIP_TAG" "$GEOVIEW_TAG" "$domain_count" "$cidr_count" "$keyword_count" "$rule_count" > "$TMP_DIR/status.json"
 
 # ---- Atomic swap into place ----
 for f in GeoSite.dat GeoIP.dat Country.mmdb direct-domains.txt direct-cidrs.txt direct-rules.txt status.json; do

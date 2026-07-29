@@ -267,15 +267,18 @@ MULTI_LISTEN=$(jsection_val advanced multi_listen)
 LOG_LEVEL=$(jsection_val advanced log_level)
 
 # ---- Decide startup mode ----
-# Config file mode is used when geodata is enabled, the rules file exists,
-# and an upstream is configured.  This allows file-based bypass with tens of
-# thousands of rules that cannot fit in a URL query parameter.
+# Config file mode is used when GeoData rules are ready or custom routing is
+# configured. File-based bypasses avoid URL-length limits for large rule sets.
+GEODATA_READY=false
+if [ "$GEODATA_ENABLED" = "true" ] && [ -s "$GEODATA_RULES" ]; then
+    GEODATA_READY=true
+fi
 USE_CONFIG=false
-if [ "$GEODATA_ENABLED" = "true" ] && [ -f "$GEODATA_RULES" ] && [ -n "$FORWARD_URL" ]; then
+if [ -n "$FORWARD_URL" ] && { [ "$GEODATA_READY" = "true" ] || { [ "$ROUTING_ENABLED" = "true" ] && [ -n "$ROUTING_BYPASS" ]; }; }; then
     USE_CONFIG=true
 fi
-if [ "$GEODATA_ENABLED" = "true" ] && [ ! -f "$GEODATA_RULES" ]; then
-    log_msg "WARNING: geodata enabled but direct-rules.txt not found; run update_geodata.sh first. Falling back to command-line mode."
+if [ "$GEODATA_ENABLED" = "true" ] && [ "$GEODATA_READY" = "false" ]; then
+    log_msg "WARNING: geodata enabled but direct-rules.txt is missing or empty; run update_geodata.sh first. Starting without GeoData bypass."
 fi
 
 # ---- Generate GOST JSON config file (config file mode) ----
@@ -350,11 +353,17 @@ generate_runtime_config() {
         fi
     fi
 
-    _bypass_json=""
+    _bypass_fields=""
     if [ -n "$_bypass_matchers" ]; then
-        _bypass_json="\"matchers\":[$_bypass_matchers],"
+        _bypass_fields="\"matchers\":[$_bypass_matchers]"
     fi
-    _bypass_json="{\"name\":\"bypass-0\",${_bypass_json}\"file\":{\"path\":\"$GEODATA_RULES\"},\"reload\":\"30s\"}"
+    if [ "$GEODATA_READY" = "true" ]; then
+        [ -n "$_bypass_fields" ] && _bypass_fields="${_bypass_fields},"
+        _bypass_fields="${_bypass_fields}\"file\":{\"path\":\"$(json_escape "$GEODATA_RULES")\"},\"reload\":\"30s\""
+    fi
+    _bypass_json="{\"name\":\"bypass-0\""
+    [ -n "$_bypass_fields" ] && _bypass_json="${_bypass_json},${_bypass_fields}"
+    _bypass_json="${_bypass_json}}"
 
     # Build resolver section
     _resolver_json="{\"name\":\"resolver-0\",\"nameservers\":[{\"addr\":\"223.5.5.5\"},{\"addr\":\"1.1.1.1\"}]}"
