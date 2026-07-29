@@ -313,15 +313,6 @@
 
             <section class="page" id="page-advanced">
                 <div class="card">
-                    <div class="card-header"><h3>DNS</h3></div>
-                    <div class="card-body">
-                        <div class="form-group">
-                            <label class="form-label" data-i18n="dns_servers">DNS Servers</label>
-                            <input type="text" class="form-input" id="advDns" placeholder="8.8.8.8,8.8.4.4">
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
                     <div class="card-header"><h3 data-i18n="logging">Logging</h3></div>
                     <div class="card-body">
                         <div class="form-group">
@@ -329,9 +320,6 @@
                             <select class="form-select" id="advLogLevel">
                                 <option value="debug">Debug</option>
                                 <option value="info" selected>Info</option>
-                                <option value="warn">Warn</option>
-                                <option value="error">Error</option>
-                                <option value="fatal">Fatal</option>
                             </select>
                         </div>
                     </div>
@@ -351,15 +339,6 @@
                         <div class="form-group">
                             <label class="form-label" data-i18n="additional_listen_ports">Additional Listen Ports (comma separated)</label>
                             <input type="text" class="form-input" id="advMultiListen" placeholder="1081,1082">
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-header"><h3 data-i18n="routes">Routes</h3></div>
-                    <div class="card-body">
-                        <div class="form-group">
-                            <label class="form-label" data-i18n="route_rules">Route Rules (JSON array)</label>
-                            <textarea class="form-textarea" id="advRoutes" rows="4" placeholder='[{"serve": "tcp://:0", "chain": "chain-0"}]'></textarea>
                         </div>
                     </div>
                 </div>

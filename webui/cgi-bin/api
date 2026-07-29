@@ -32,6 +32,7 @@ for pair in $(echo "$Q" | tr '&' ' ' 2>/dev/null); do
     case "$key" in
         endpoint) ENDPOINT="$val" ;;
         lines)    LINES="$val" ;;
+        name)     QUERY_NAME="$val" ;;
     esac
 done
 
@@ -46,9 +47,7 @@ fi
 # ---- Helpers ----
 json_header() {
     printf 'Content-Type: application/json; charset=utf-8\r\n'
-    printf 'Access-Control-Allow-Origin: *\r\n'
-    printf 'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
-    printf 'Access-Control-Allow-Headers: Content-Type\r\n'
+    printf 'Cache-Control: no-store\r\n'
     printf '\r\n'
 }
 
@@ -78,12 +77,50 @@ extract_json_name() {
     echo "$BODY" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"//' | tr -d '"'
 }
 
+# Node names become filenames. Keep them deliberately strict so a WebUI
+# request cannot escape NODES_DIR or create ambiguous names.
+valid_node_name() {
+    _name="$1"
+    [ -n "$_name" ] && [ ${#_name} -le 64 ] || return 1
+    case "$_name" in
+        *[!A-Za-z0-9._-]*|.*|*..*) return 1 ;;
+    esac
+    return 0
+}
+
 # Get active node name
 get_active_node() {
     if [ -f "$ACTIVE_FILE" ]; then
         cat "$ACTIVE_FILE"
     else
         echo "default"
+    fi
+}
+
+write_config() {
+    _data="$1"
+    [ -n "$_data" ] || return 1
+    [ ${#_data} -le 65536 ] || return 1
+    printf '%s' "$_data" | grep -q '^[[:space:]]*{' || return 1
+    printf '%s' "$_data" | grep -q '}[[:space:]]*$' || return 1
+
+    _listen_port=$(printf '%s' "$_data" | grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
+    _webui_port=$(printf '%s' "$_data" | grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
+    [ -n "$_listen_port" ] && [ "$_listen_port" -ge 1 ] 2>/dev/null && [ "$_listen_port" -le 65535 ] 2>/dev/null || return 1
+    [ -z "$_webui_port" ] || { [ "$_webui_port" -ge 1 ] 2>/dev/null && [ "$_webui_port" -le 65535 ] 2>/dev/null; } || return 1
+
+    _tmp="$CONFIG.tmp.$$"
+    umask 077
+    printf '%s' "$_data" > "$_tmp" || return 1
+    mv -f "$_tmp" "$CONFIG" || { rm -f "$_tmp"; return 1; }
+    return 0
+}
+
+# Keep edits to config.json synchronized with the active saved node.
+sync_active_node() {
+    _active=$(get_active_node)
+    if valid_node_name "$_active" && [ -f "$NODES_DIR/${_active}.json" ]; then
+        cp "$CONFIG" "$NODES_DIR/${_active}.json"
     fi
 }
 
@@ -121,13 +158,13 @@ case "$ENDPOINT" in
                 printf '{"error":"Config not found"}'
             fi
         elif [ "$REQUEST_METHOD" = "POST" ]; then
-            if [ -n "$BODY" ]; then
-                printf '%s' "$BODY" > "$CONFIG"
+            if write_config "$BODY"; then
+                sync_active_node
                 json_header
                 printf '{"success":true,"message":"Config saved"}'
             else
                 json_header
-                printf '{"success":false,"message":"Empty body"}'
+                printf '{"success":false,"message":"Invalid config"}'
             fi
         fi
         ;;
@@ -168,13 +205,57 @@ case "$ENDPOINT" in
         if [ -z "$NODE_NAME" ]; then
             json_header
             printf '{"success":false,"message":"Node name required"}'
+        elif ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
         elif [ ! -f "$CONFIG" ]; then
             json_header
             printf '{"success":false,"message":"No active config to save"}'
+        elif [ -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node already exists"}'
         else
             cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json"
+            echo "$NODE_NAME" > "$ACTIVE_FILE"
             json_header
             printf '{"success":true,"message":"Node saved","name":"%s"}' "$NODE_NAME"
+        fi
+        ;;
+
+    nodes/get)
+        NODE_NAME="${QUERY_NAME:-$(extract_json_name)}"
+        if ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
+        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node not found"}'
+        else
+            printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'
+            cat "$NODES_DIR/${NODE_NAME}.json"
+        fi
+        ;;
+
+    nodes/update)
+        NODE_NAME=$(extract_json_name)
+        NODE_CONFIG=$(printf '%s' "$BODY" | sed 's/^[^{]*"config"[[:space:]]*:[[:space:]]*//; s/}[[:space:]]*$//')
+        if ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
+        elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node not found"}'
+        elif [ -z "$NODE_CONFIG" ]; then
+            json_header
+            printf '{"success":false,"message":"Invalid config"}'
+        else
+            _tmp="$NODES_DIR/${NODE_NAME}.json.tmp.$$"
+            printf '%s' "$NODE_CONFIG" > "$_tmp" && mv -f "$_tmp" "$NODES_DIR/${NODE_NAME}.json"
+            if [ "$NODE_NAME" = "$(get_active_node)" ]; then
+                cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
+            fi
+            json_header
+            printf '{"success":true,"message":"Node updated","name":"%s"}' "$NODE_NAME"
         fi
         ;;
 
@@ -183,6 +264,9 @@ case "$ENDPOINT" in
         if [ -z "$NODE_NAME" ]; then
             json_header
             printf '{"success":false,"message":"Node name required"}'
+        elif ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
         elif [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
             json_header
             printf '{"success":false,"message":"Node not found"}'
@@ -200,6 +284,9 @@ case "$ENDPOINT" in
         if [ -z "$NODE_NAME" ]; then
             json_header
             printf '{"success":false,"message":"Node name required"}'
+        elif ! valid_node_name "$NODE_NAME"; then
+            json_header
+            printf '{"success":false,"message":"Invalid node name"}'
         elif [ "$NODE_NAME" = "$ACTIVE_NODE" ]; then
             json_header
             printf '{"success":false,"message":"Cannot delete active node"}'
@@ -299,6 +386,7 @@ case "$ENDPOINT" in
     config/import)
         if [ -n "$BODY" ]; then
             printf '%s' "$BODY" > "$CONFIG"
+            sync_active_node
             json_header
             printf '{"success":true,"message":"Config imported"}'
         else

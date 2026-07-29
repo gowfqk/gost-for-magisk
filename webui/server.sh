@@ -104,6 +104,18 @@ if [ "$1" = "--handle" ]; then
     esac
 
     if [ "$IS_API" = "1" ]; then
+        # Reuse the same CGI implementation as busybox httpd so node and
+        # configuration behavior stays identical in every server strategy.
+        CGI_SCRIPT="$WEBUI_DIR/cgi-bin/api"
+        if [ ! -f "$CGI_SCRIPT" ]; then
+            printf 'HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"API handler missing"}'
+            exit 0
+        fi
+        printf 'HTTP/1.1 200 OK\r\nConnection: close\r\n'
+        printf '%s' "$BODY" | QUERY_STRING="$QUERY" REQUEST_METHOD="$METHOD" CONTENT_LENGTH="$CONTENT_LENGTH" sh "$CGI_SCRIPT"
+        exit 0
+
+        # Legacy inline handler kept unreachable for compatibility reference.
         # Parse query params
         LOG_LINES="200"
         echo "$QUERY" | grep -q "lines=" && LOG_LINES=$(echo "$QUERY" | sed 's/.*lines=//' | grep -o '[0-9]*')
@@ -197,6 +209,12 @@ if [ "$1" = "--handle" ]; then
                 send_static "$WEBUI_DIR/index.html"
                 ;;
             /*)
+                case "$PATH_ONLY" in
+                    *..*|*\\*|*%2[eE]*|*%5[cC]*)
+                        printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n400 Bad Request'
+                        exit 0
+                        ;;
+                esac
                 FP="$WEBUI_DIR$PATH_ONLY"
                 if [ -f "$FP" ]; then
                     send_static "$FP"
@@ -259,8 +277,8 @@ if "$BB" --list 2>/dev/null | grep -qx "httpd"; then
     if [ -f "$CGI_SCRIPT" ]; then
         chmod 755 "$CGI_SCRIPT" 2>/dev/null
         log_msg "Strategy: httpd + CGI"
-        log_msg "Starting: $BB httpd -f -p $PORT -h $WEBUI_DIR"
-        exec "$BB" httpd -f -p "$PORT" -h "$WEBUI_DIR"
+        log_msg "Starting: $BB httpd -f -p 127.0.0.1:$PORT -h $WEBUI_DIR"
+        exec "$BB" httpd -f -p "127.0.0.1:$PORT" -h "$WEBUI_DIR"
     fi
     log_msg "httpd available but CGI script missing, trying nc..."
 else
@@ -290,7 +308,7 @@ if "$BB" --list 2>/dev/null | grep -qx "nc"; then
         # Try nc -l -p PORT -e WRAPPER in a loop
         FAIL=0
         while true; do
-            "$BB" nc -l -p "$PORT" -e "$WRAPPER" 2>>"$LOGFILE"
+            "$BB" nc -l -s 127.0.0.1 -p "$PORT" -e "$WRAPPER" 2>>"$LOGFILE"
             RC=$?
             if [ $RC -ne 0 ]; then
                 FAIL=$((FAIL + 1))
@@ -298,7 +316,7 @@ if "$BB" --list 2>/dev/null | grep -qx "nc"; then
                 if [ $FAIL -ge 3 ]; then
                     # Try alternative nc syntax: nc -l PORT -e WRAPPER
                     log_msg "Trying nc -l $PORT -e ..."
-                    "$BB" nc -l "$PORT" -e "$WRAPPER" 2>>"$LOGFILE"
+                    "$BB" nc -l -s 127.0.0.1 "$PORT" -e "$WRAPPER" 2>>"$LOGFILE"
                     RC2=$?
                     if [ $RC2 -ne 0 ]; then
                         log_msg "nc -l -e also failed (code=$RC2), falling back to FIFO"
@@ -343,7 +361,7 @@ while true; do
     # Open FIFO in background to prevent deadlock
     sleep 0.1 2>/dev/null || true
 
-    "$BB" nc -l -p "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
+    "$BB" nc -l -s 127.0.0.1 -p "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
 
     NC_EXIT=$?
     if [ $NC_EXIT -ne 0 ]; then
@@ -354,7 +372,7 @@ while true; do
             log_msg "Trying nc -l $PORT (no -p)..."
             rm -f "$FIFO"
             mkfifo "$FIFO" 2>/dev/null
-            "$BB" nc -l "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
+            "$BB" nc -l -s 127.0.0.1 "$PORT" < "$FIFO" 2>>"$LOGFILE" | sh "$SCRIPT" --handle "$MODDIR" > "$FIFO" 2>>"$LOGFILE"
             if [ $? -ne 0 ]; then
                 log_msg "All nc strategies failed. Waiting 10s before retry..."
                 sleep 10

@@ -29,7 +29,8 @@
         "ca": ""
     },
     "websocket": {
-        "path": "/ws",
+        "enabled": false,
+        "path": "",
         "host": ""
     },
     "advanced": {

@@ -7,6 +7,7 @@
     var LOG_AUTO_REFRESH_MS = 2000;
     var STATUS_REFRESH_MS = 3000;
     var currentLang = "en";
+    var editingNodeName = "";
 
     // ---- i18n Dictionary ----
     var i18n = {
@@ -40,8 +41,9 @@
             running: "Running", stopped: "Stopped",
             no_nodes: "No saved nodes. Save current config as a node above.",
             failed_load_nodes: "Failed to load nodes.",
-            in_use: "In Use", switch_btn: "Switch", delete_btn: "Delete",
-            node_saved: "Node '{name}' saved", node_switched: "Switched to node '{name}'",
+            in_use: "In Use", edit_btn: "Edit", switch_btn: "Switch", delete_btn: "Delete",
+            node_saved: "Node '{name}' saved and activated", node_switched: "Switched to node '{name}'",
+            node_editing: "Editing node '{name}'. Save config to apply changes.",
             node_deleted: "Node '{name}' deleted", save_failed: "Save failed",
             switch_failed: "Switch failed", delete_failed: "Delete failed",
             enter_node_name: "Please enter a node name",
@@ -88,8 +90,9 @@
             running: "运行中", stopped: "已停止",
             no_nodes: "暂无保存的节点。请在上方保存当前配置为节点。",
             failed_load_nodes: "加载节点失败。",
-            in_use: "使用中", switch_btn: "切换", delete_btn: "删除",
-            node_saved: "节点 '{name}' 已保存", node_switched: "已切换到节点 '{name}'",
+            in_use: "使用中", edit_btn: "编辑", switch_btn: "切换", delete_btn: "删除",
+            node_saved: "节点 '{name}' 已保存并设为活动节点", node_switched: "已切换到节点 '{name}'",
+            node_editing: "正在编辑节点 '{name}'，保存配置后生效。",
             node_deleted: "节点 '{name}' 已删除", save_failed: "保存失败",
             switch_failed: "切换失败", delete_failed: "删除失败",
             enter_node_name: "请输入节点名称",
@@ -243,7 +246,7 @@
         $("tlsCa").value = tls.ca || "";
 
         var ws = config.websocket || {};
-        $("wsPath").value = ws.path || "/ws";
+        $("wsPath").value = ws.path || "";
         $("wsHost").value = ws.host || "";
 
         var upstream = config.upstream || {};
@@ -259,15 +262,9 @@
         $("upstreamWsHost").value = upstream.ws_host || "";
 
         var adv = config.advanced || {};
-        $("advDns").value = adv.dns || "";
         $("advLogLevel").value = adv.log_level || "info";
         $("advWebuiPort").value = config.webui_port || 8080;
         $("advMultiListen").value = (adv.multi_listen || []).join(",");
-        try {
-            $("advRoutes").value = JSON.stringify(adv.routes || [], null, 2);
-        } catch (e) {
-            $("advRoutes").value = "[]";
-        }
 
         updateProxyTypeFields();
     }
@@ -280,11 +277,6 @@
                 return s.trim();
             }).filter(Boolean);
         }
-
-        var routes = [];
-        try {
-            routes = JSON.parse($("advRoutes").value || "[]");
-        } catch (e) {}
 
         return {
             proxy_type: $("proxyType").value,
@@ -321,9 +313,7 @@
                 host: $("wsHost").value
             },
             advanced: {
-                dns: $("advDns").value,
                 log_level: $("advLogLevel").value,
-                routes: routes,
                 multi_listen: multiListen
             }
         };
@@ -568,6 +558,7 @@
             html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "http") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
             html += "  </div>";
             html += '  <div class="node-actions">';
+            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.editNode(\'' + escapeHtml(node.name) + '\')">' + t("edit_btn") + '</button>';
             if (!isActive) {
                 html += '    <button class="btn btn-sm btn-primary" onclick="window.__app.switchNode(\'' + escapeHtml(node.name) + '\')">' + t("switch_btn") + '</button>';
                 html += '    <button class="btn btn-sm btn-danger" onclick="window.__app.deleteNode(\'' + escapeHtml(node.name) + '\')">' + t("delete_btn") + '</button>';
@@ -606,11 +597,32 @@
                 showToast(t("node_saved", {name: name}), "success");
                 $("nodeSaveName").value = "";
                 loadNodes();
+                loadStatus();
             } else {
                 showToast(res.message || t("save_failed"), "error");
             }
         }).catch(function () {
             showToast(t("save_failed"), "error");
+        });
+    }
+
+    function editNode(name) {
+        fetchJSON("/cgi-bin/api?endpoint=nodes/switch", {
+            method: "POST",
+            body: { name: name }
+        }).then(function (res) {
+            if (res.success) {
+                loadConfig();
+                loadNodes();
+                loadStatus();
+                loadCommand();
+                switchPage("proxy");
+                showToast(t("node_editing", {name: name}), "success");
+            } else {
+                showToast(res.message || t("switch_failed"), "error");
+            }
+        }).catch(function () {
+            showToast(t("switch_failed"), "error");
         });
     }
 
@@ -733,7 +745,7 @@
         $("btnNodeSave").addEventListener("click", saveNode);
         $("btnRefreshNodes").addEventListener("click", loadNodes);
         // Expose for inline onclick handlers
-        window.__app = { switchNode: switchNode, deleteNode: deleteNode };
+        window.__app = { editNode: editNode, switchNode: switchNode, deleteNode: deleteNode };
 
         loadStatus();
         loadConfig();
