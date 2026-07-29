@@ -15,6 +15,9 @@
             nav_dashboard: "Dashboard", nav_proxy: "Proxy", nav_nodes: "Nodes",
             nav_advanced: "Advanced", nav_logs: "Logs",
             status: "Status", gost: "Gost", configuration: "Configuration",
+            gost_binary: "Gost Binary", gost_binary_ready: "Installed", gost_binary_missing: "Not installed",
+            download_gost: "Download Gost", downloading_gost: "Downloading...", gost_download_started: "Gost download started",
+            gost_download_failed: "Download failed", gost_download_hint: "Install the Gost binary manually after module installation. Download progress is written to the service log.",
             proxy_type: "Proxy Type", listen: "Listen", port: "Port", node: "Node",
             system: "System", architecture: "Architecture", webui_port: "WebUI Port",
             start: "Start", stop: "Stop", restart: "Restart", test_proxy: "Test Proxy",
@@ -87,6 +90,9 @@
             nav_dashboard: "仪表盘", nav_proxy: "代理", nav_nodes: "节点",
             nav_advanced: "高级", nav_logs: "日志",
             status: "状态", gost: "Gost", configuration: "配置",
+            gost_binary: "Gost 二进制", gost_binary_ready: "已安装", gost_binary_missing: "未安装",
+            download_gost: "下载 Gost", downloading_gost: "正在下载…", gost_download_started: "Gost 下载已开始",
+            gost_download_failed: "下载失败", gost_download_hint: "模块安装后在这里手动安装 Gost 二进制，下载进度会写入服务日志。",
             proxy_type: "代理类型", listen: "监听", port: "端口", node: "节点",
             system: "系统", architecture: "架构", webui_port: "WebUI 端口",
             start: "启动", stop: "停止", restart: "重启", test_proxy: "测试代理",
@@ -241,6 +247,10 @@
         $("dashGostStatus").textContent = gostStatus;
         $("dashGostStatus").className = "info-value " + gostStatus;
         $("dashGostPid").textContent = gostPid;
+        $("dashGostBinary").textContent = data.gost && data.gost.binary_ready ? t("gost_binary_ready") : t("gost_binary_missing");
+        $("dashGostBinary").className = "info-value " + (data.gost && data.gost.binary_ready ? "running" : "stopped");
+        $("btnDownloadGost").disabled = !!(data.gost && (data.gost.binary_ready || data.gost.downloading));
+        $("btnDownloadGost").textContent = data.gost && data.gost.downloading ? t("downloading_gost") : t("download_gost");
         $("dashWebuiStatus").textContent = data.webui ? data.webui.status : "-";
         $("dashWebuiStatus").className = "info-value " + (data.webui ? data.webui.status : "");
         $("dashProxyType").textContent = data.proxy_type || "-";
@@ -260,6 +270,23 @@
                 updateDashboard(data);
             })
             .catch(function () {});
+    }
+
+    function downloadGost() {
+        var button = $("btnDownloadGost");
+        button.disabled = true;
+        button.textContent = t("downloading_gost");
+        fetchJSON("/cgi-bin/api?endpoint=gost/download", {method: "POST"})
+            .then(function (res) {
+                if (!res.success) throw new Error(res.message || t("gost_download_failed"));
+                showToast(t("gost_download_started"), "success");
+                loadStatus();
+            })
+            .catch(function (err) {
+                button.disabled = false;
+                button.textContent = t("download_gost");
+                showToast((err && err.message) || t("gost_download_failed"), "error");
+            });
     }
 
     function loadConfig() {
@@ -550,6 +577,10 @@
         });
     }
 
+    function updateBulkImportButton() {
+        $("btnBulkImportLinks").disabled = !$("bulkImportLinks").value.trim();
+    }
+
     function bulkImportProxyLinks() {
         var links = $("bulkImportLinks").value.split(/\r?\n/).map(function (link) { return link.trim(); }).filter(Boolean);
         if (!links.length) {
@@ -577,7 +608,7 @@
         }).catch(function () {
             showToast(t("import_fail"), "error");
         }).then(function () {
-            button.disabled = false;
+            updateBulkImportButton();
         });
     }
 
@@ -961,6 +992,7 @@
             gostAction("restart");
         });
         $("btnTestProxy").addEventListener("click", testProxy);
+        $("btnDownloadGost").addEventListener("click", downloadGost);
 
         $("proxyType").addEventListener("change", updateProxyTypeFields);
         $("authEnabled").addEventListener("change", toggleAuthFields);
@@ -981,6 +1013,13 @@
         });
 
         $("btnImportLink").addEventListener("click", importProxyLink);
+        $("bulkImportLinks").addEventListener("input", updateBulkImportButton);
+        $("bulkImportLinks").addEventListener("change", updateBulkImportButton);
+        $("bulkImportLinks").addEventListener("paste", function () {
+            setTimeout(updateBulkImportButton, 0);
+        });
+        $("btnBulkImportLinks").addEventListener("click", bulkImportProxyLinks);
+        updateBulkImportButton();
 
         $("btnRefreshLogs").addEventListener("click", loadLogs);
 

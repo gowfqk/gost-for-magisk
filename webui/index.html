@@ -47,6 +47,10 @@
                                 <span class="info-value" id="dashGostPid">-</span>
                             </div>
                             <div class="info-row">
+                                <span class="info-label" data-i18n="gost_binary">Gost Binary</span>
+                                <span class="info-value" id="dashGostBinary">-</span>
+                            </div>
+                            <div class="info-row">
                                 <span class="info-label">WebUI</span>
                                 <span class="info-value" id="dashWebuiStatus">-</span>
                             </div>
@@ -96,7 +100,9 @@
                     <button class="btn btn-stop" id="btnStop" data-i18n="stop">Stop</button>
                     <button class="btn btn-restart" id="btnRestart" data-i18n="restart">Restart</button>
                     <button class="btn btn-primary" id="btnTestProxy" data-i18n="test_proxy">Test Proxy</button>
+                    <button class="btn btn-secondary" id="btnDownloadGost" data-i18n="download_gost">Download Gost</button>
                 </div>
+                <p class="text-muted" style="margin-top:8px" data-i18n="gost_download_hint">Install the Gost binary manually after module installation.</p>
                 <div class="card" id="proxyTestCard" style="display:none;margin-top:16px">
                     <div class="card-header"><h3 data-i18n="proxy_test_result">Proxy Test Result</h3></div>
                     <div class="card-body">
@@ -283,7 +289,7 @@
                             <label class="form-label" data-i18n="bulk_import_links">Bulk Import Links</label>
                             <textarea class="form-input" id="bulkImportLinks" rows="6" placeholder="socks://...&#10;ss://..." data-i18n-ph="bulk_import_links_ph"></textarea>
                         </div>
-                        <button class="btn btn-secondary" id="btnBulkImportLinks" data-i18n="bulk_import">Bulk Import</button>
+                        <button type="button" class="btn btn-primary" id="btnBulkImportLinks" data-i18n="bulk_import" disabled>Bulk Import</button>
                     </div>
                 </div>
 

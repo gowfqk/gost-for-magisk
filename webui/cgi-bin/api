@@ -172,9 +172,15 @@ case "$ENDPOINT" in
         GEODATA_EN=$(jsection_val geodata enabled)
         GEODATA_READY="false"
         [ -f "$MODDIR/gost/geodata/direct-rules.txt" ] && GEODATA_READY="true"
+        GOST_BINARY_READY="false"
+        if [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+            GOST_BINARY_READY="true"
+        fi
+        GOST_DOWNLOADING="false"
+        [ -d "/tmp/gost-download.lock" ] && GOST_DOWNLOADING="true"
         json_header
-        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s","active_node":"%s","geodata_enabled":"%s","geodata_ready":"%s"}' \
-            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA" "$ACTIVE_NODE" "$GEODATA_EN" "$GEODATA_READY"
+        printf '{"gost":{"status":"%s","pid":"%s","binary_ready":%s,"downloading":%s},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s","active_node":"%s","geodata_enabled":"%s","geodata_ready":"%s"}' \
+            "$GOST_STATUS" "$GOST_PID" "$GOST_BINARY_READY" "$GOST_DOWNLOADING" "$WP" "$ARCH" "$LP" "$PT" "$LA" "$ACTIVE_NODE" "$GEODATA_EN" "$GEODATA_READY"
         ;;
 
     config)
@@ -386,6 +392,38 @@ case "$ENDPOINT" in
             printf '{"success":true,"message":"gost restarted (PID: %s)"}' "$(cat "$PIDFILE")"
         else
             printf '{"success":false,"message":"gost failed to restart"}'
+        fi
+        ;;
+
+    gost/download)
+        DOWNLOAD_SCRIPT="$MODDIR/scripts/download_gost.sh"
+        DOWNLOAD_LOCK="/tmp/gost-download.lock"
+        DOWNLOAD_LOG="$MODDIR/logs/gost-download.log"
+        json_header
+        if [ "$REQUEST_METHOD" != "POST" ]; then
+            printf '{"success":false,"message":"POST required"}'
+        elif [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+            printf '{"success":false,"message":"Gost binary is already installed"}'
+        elif [ -d "$DOWNLOAD_LOCK" ]; then
+            printf '{"success":false,"message":"Download already in progress"}'
+        elif [ ! -f "$DOWNLOAD_SCRIPT" ]; then
+            printf '{"success":false,"message":"download_gost.sh not found"}'
+        else
+            mkdir "$DOWNLOAD_LOCK" 2>/dev/null || {
+                printf '{"success":false,"message":"Download already in progress"}'
+                exit 0
+            }
+            chmod 755 "$DOWNLOAD_SCRIPT" 2>/dev/null
+            mkdir -p "$MODDIR/logs"
+            (
+                sh "$DOWNLOAD_SCRIPT" "$MODDIR/gost" >"$DOWNLOAD_LOG" 2>&1
+                _result=$?
+                if [ "$_result" -eq 0 ] && [ -s "$MODDIR/gost/gost" ]; then
+                    chmod 755 "$MODDIR/gost/gost" 2>/dev/null
+                fi
+                rm -rf "$DOWNLOAD_LOCK"
+            ) >/dev/null 2>&1 &
+            printf '{"success":true,"message":"Gost download started"}'
         fi
         ;;
 

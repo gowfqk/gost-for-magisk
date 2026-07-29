@@ -143,7 +143,7 @@ ui_print ""
 ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
-# touching preserved data or attempting a binary download.
+# touching preserved data or finishing the offline installation.
 for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
@@ -203,35 +203,17 @@ if [ ! -f "$MODDIR/gost/config.json" ]; then
 fi
 
 # ---- Handle gost binary ----
+# Installation must remain offline and deterministic. If no reusable binary is
+# available, finish installing the module and let the user download it later
+# from WebUI.
 if [ ! -s "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+    rm -f "$MODDIR/gost/gost"
     ui_print ""
-    ui_print "gost binary not found or is placeholder."
-    ui_print "Attempting automatic download..."
-    ui_print ""
-    if [ -f "$MODDIR/scripts/download_gost.sh" ]; then
-        chmod 755 "$MODDIR/scripts/download_gost.sh"
-        sh "$MODDIR/scripts/download_gost.sh" "$MODDIR/gost" 2>&1 | while read -r line; do
-            ui_print "$line"
-        done
-        if [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
-            ui_print ""
-            ui_print "gost binary downloaded successfully!"
-        else
-            ui_print ""
-            ui_print "WARNING: Auto-download failed!"
-            ui_print "Please manually download from:"
-            ui_print "  https://github.com/go-gost/gost/releases"
-            ui_print "Place the binary at: gost/gost"
-        fi
-    else
-        ui_print "WARNING: download_gost.sh not found"
-        ui_print "Please manually download gost binary for $GOST_ARCH"
-        ui_print "from: https://github.com/go-gost/gost/releases"
-        ui_print "Place at: gost/gost"
-    fi
+    ui_print "- Gost binary is not installed; no download will run during installation."
+    ui_print "- After reboot, open WebUI and tap Download Gost."
     ui_print ""
 else
-    ui_print "gost binary found, skipping download."
+    ui_print "- Existing gost binary is ready; no download needed."
 fi
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null

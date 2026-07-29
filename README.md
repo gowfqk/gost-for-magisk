@@ -6,7 +6,7 @@
 
 - 🚀 **开机自启** - 通过 Magisk service.sh 自动启动 gost 代理和 WebUI
 - 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等），纯 shell 后端无需 Python
-- 📦 **自动下载二进制** - 安装时自动检测架构并下载对应 gost 二进制，国内网络自动使用加速镜像
+- 📦 **WebUI 下载二进制** - 模块安装过程不联网；安装后由用户在 WebUI 手动下载对应架构的 gost，国内网络自动尝试加速镜像
 - 🔀 **透明代理** - 使用 gost `red` 监听器和 iptables 自动接管本机 TCP 流量；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
 - 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
 - 🛡️ **完整生命周期管理** - 启动 / 停止 / 重启 / 状态查询 / 日志查看
@@ -17,8 +17,8 @@
 
 1. 将本项目打包为 zip 文件
 2. 在 Magisk Manager 中选择「从存储安装」
-3. 选择该 zip 文件
-4. 安装过程中会自动下载 gost 二进制（需网络连接）
+3. 选择该 zip 文件并完成安装
+4. 重启后打开 `http://127.0.0.1:8080`，点击「下载 Gost」手动安装二进制
 
 ### 方式二：手动放置二进制
 
@@ -48,9 +48,9 @@ sh /data/adb/modules/gost_proxy/scripts/status.sh
 sh /data/adb/modules/gost_proxy/scripts/download_gost.sh
 ```
 
-## 自动下载脚本
+## 手动下载脚本
 
-`scripts/download_gost.sh` 提供自动下载 gost 二进制功能：
+WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模块时不会执行该脚本。该脚本提供：
 
 - **架构自动检测** - 通过 `getprop` (Android) 或 `uname` (Linux) 检测设备架构
 - **国内网络检测** - 通过 GitHub API 连通性测试 + IP 地理位置双重检测
