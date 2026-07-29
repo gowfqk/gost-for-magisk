@@ -89,6 +89,14 @@ extract_json_name() {
     echo "$BODY" | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"//' | tr -d '"'
 }
 
+extract_json_display_name() {
+    echo "$BODY" | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"//' | tr -d '"'
+}
+
+json_escape_value() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{if (NR > 1) printf "\\n"; printf "%s", $0}'
+}
+
 # Node names become filenames. Keep them deliberately strict so a WebUI
 # request cannot escape NODES_DIR or create ambiguous names.
 valid_node_name() {
@@ -191,6 +199,9 @@ case "$ENDPOINT" in
             for _f in "$NODES_DIR"/*.json; do
                 [ -f "$_f" ] || continue
                 _name=$(basename "$_f" .json)
+                _display_name=$(jval_file "$_f" node_name)
+                [ -z "$_display_name" ] && _display_name="$_name"
+                _display_name=$(json_escape_value "$_display_name")
                 _ptype=$(jval_file "$_f" proxy_type)
                 [ -z "$_ptype" ] && _ptype="http"
                 _lport=$(jval_file "$_f" listen_port)
@@ -204,7 +215,7 @@ case "$ENDPOINT" in
                 if [ $_first -eq 0 ]; then
                     NODES_JSON="${NODES_JSON},"
                 fi
-                NODES_JSON="${NODES_JSON}{\"name\":\"${_name}\",\"proxy_type\":\"${_ptype}\",\"listen_port\":${_lport},\"upstream\":{\"enabled\":\"${_uenabled}\",\"type\":\"${_utype}\",\"addr\":\"${_uaddr}\",\"port\":\"${_uport}\"},\"active\":${_is_active}}"
+                NODES_JSON="${NODES_JSON}{\"id\":\"${_name}\",\"name\":\"${_display_name}\",\"display_name\":\"${_display_name}\",\"proxy_type\":\"${_ptype}\",\"listen_port\":${_lport},\"upstream\":{\"enabled\":\"${_uenabled}\",\"type\":\"${_utype}\",\"addr\":\"${_uaddr}\",\"port\":\"${_uport}\"},\"active\":${_is_active}}"
                 _first=0
             done
         fi
@@ -250,6 +261,36 @@ case "$ENDPOINT" in
             echo "$NODE_NAME" > "$ACTIVE_FILE"
             json_header
             printf '{"success":true,"message":"Node saved","name":"%s"}' "$NODE_NAME"
+        fi
+        ;;
+
+    nodes/rename)
+        NODE_NAME=$(extract_json_name)
+        DISPLAY_NAME=$(extract_json_display_name)
+        if ! valid_node_name "$NODE_NAME" || [ ! -f "$NODES_DIR/${NODE_NAME}.json" ]; then
+            json_header
+            printf '{"success":false,"message":"Node not found"}'
+        elif [ -z "$DISPLAY_NAME" ] || [ ${#DISPLAY_NAME} -gt 64 ]; then
+            json_header
+            printf '{"success":false,"message":"Invalid display name"}'
+        else
+            _escaped=$(json_escape_value "$DISPLAY_NAME")
+            _sed_name=$(printf '%s' "$_escaped" | sed 's/[\\&|]/\\&/g')
+            _tmp="$NODES_DIR/${NODE_NAME}.json.tmp.$$"
+            if grep -q '"node_name"[[:space:]]*:' "$NODES_DIR/${NODE_NAME}.json"; then
+                sed "s|\"node_name\"[[:space:]]*:[[:space:]]*\"[^\"]*\"|\"node_name\": \"$_sed_name\"|" "$NODES_DIR/${NODE_NAME}.json" > "$_tmp"
+            else
+                sed "0,/{/s||{\n    \"node_name\": \"$_sed_name\",|" "$NODES_DIR/${NODE_NAME}.json" > "$_tmp"
+            fi
+            if mv -f "$_tmp" "$NODES_DIR/${NODE_NAME}.json"; then
+                [ "$NODE_NAME" = "$(get_active_node)" ] && cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
+                json_header
+                printf '{"success":true,"name":"%s","display_name":"%s"}' "$NODE_NAME" "$_escaped"
+            else
+                rm -f "$_tmp"
+                json_header
+                printf '{"success":false,"message":"Rename failed"}'
+            fi
         fi
         ;;
 

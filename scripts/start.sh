@@ -320,6 +320,12 @@ fi
 # ---- Build optional extra listeners and log flags ----
 MULTI_LISTEN=$(jsection_val advanced multi_listen)
 LOG_LEVEL=$(jsection_val advanced log_level)
+ROUTING_ENABLED=$(jsection_val routing enabled)
+ROUTING_BYPASS=$(jsection_val routing bypass)
+if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$ROUTING_BYPASS" ] && [ -n "$FORWARD_URL" ]; then
+    ROUTING_BYPASS=$(printf '%s' "$ROUTING_BYPASS" | tr -d ' []"' | tr '\n' ',')
+    [ -n "$ROUTING_BYPASS" ] && FORWARD_URL="${FORWARD_URL}&bypass=$(urlencode "$ROUTING_BYPASS")"
+fi
 
 set -- -L "$LISTEN_URL"
 OLD_IFS=$IFS

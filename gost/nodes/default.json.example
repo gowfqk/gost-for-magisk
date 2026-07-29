@@ -39,6 +39,11 @@
         "path": "",
         "host": ""
     },
+    "routing": {
+        "enabled": false,
+        "bypass": [],
+        "direct_uids": []
+    },
     "advanced": {
         "log_level": "info",
         "multi_listen": []

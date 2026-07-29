@@ -274,6 +274,10 @@
                         <div class="form-group">
                             <input type="text" class="form-input" id="importLinkInput" placeholder="socks://..." data-i18n-ph="import_link_ph">
                         </div>
+                        <div class="form-group">
+                            <label class="form-label" data-i18n="node_name">Node Name</label>
+                            <input type="text" class="form-input" id="importNodeName" placeholder="Auto from link remarks">
+                        </div>
                         <button class="btn btn-primary" id="btnImportLink" data-i18n="import_link">Import Link</button>
                     </div>
                 </div>
@@ -336,6 +340,27 @@
                             <label class="form-label" data-i18n="webui_port">WebUI Port</label>
                             <input type="number" class="form-input" id="advWebuiPort" value="8080" min="1" max="65535">
                         </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3>TCP Split Routing</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" id="routingEnabled">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">Enable custom split routing</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Direct domains / IP / CIDR (one per line)</label>
+                            <textarea class="form-input" id="routingBypass" rows="6" placeholder=".cn&#10;*.example.cn&#10;203.0.113.0/24"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Direct Android UIDs (comma separated)</label>
+                            <input type="text" class="form-input" id="routingDirectUids" placeholder="1000,10123">
+                        </div>
+                        <p class="text-muted">Domain/IP rules bypass the upstream chain. UID rules bypass transparent interception. TCP only.</p>
                     </div>
                 </div>
                 <div class="card">

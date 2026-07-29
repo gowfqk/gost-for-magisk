@@ -268,8 +268,16 @@
         $("advLogLevel").value = adv.log_level || "info";
         $("advWebuiPort").value = config.webui_port || 8080;
         $("advMultiListen").value = (adv.multi_listen || []).join(",");
+        var routing = config.routing || {};
+        $("routingEnabled").checked = !!routing.enabled;
+        $("routingBypass").value = (routing.bypass || []).join("\n");
+        $("routingDirectUids").value = (routing.direct_uids || []).join(",");
 
         updateProxyTypeFields();
+    }
+
+    function splitList(value) {
+        return String(value || "").split(/[\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
     }
 
     function collectConfig() {
@@ -320,6 +328,11 @@
             websocket: {
                 path: $("wsPath").value,
                 host: $("wsHost").value
+            },
+            routing: {
+                enabled: $("routingEnabled").checked,
+                bypass: splitList($("routingBypass").value),
+                direct_uids: splitList($("routingDirectUids").value)
             },
             advanced: {
                 log_level: $("advLogLevel").value,
@@ -414,16 +427,19 @@
         }
     }
 
-    function safeNodeName(name) {
+    function safeNodeId(name) {
         var safe = String(name || "").trim()
             .replace(/[^A-Za-z0-9._-]+/g, "-")
             .replace(/^-+|-+$/g, "")
             .replace(/\.\.+/g, ".")
-            .substring(0, 48);
-        if (!safe || safe.charAt(0) === ".") {
-            safe = "imported-" + Date.now();
-        }
-        return safe;
+            .substring(0, 40);
+        if (!safe || safe.charAt(0) === ".") safe = "node";
+        return safe + "-" + Date.now().toString(36);
+    }
+
+    function cleanDisplayName(name, fallback) {
+        var display = String(name || "").trim().replace(/[\x00-\x1f\x7f]/g, "").substring(0, 64);
+        return display || String(fallback || "Imported node").substring(0, 64);
     }
 
     function importProxyLink() {
@@ -468,21 +484,24 @@
         toggleUpstreamRouteFields();
         updateProxyTypeFields();
 
-        // Importing a link should create a saved node, not merely overwrite the
-        // current config. Generate a filename-safe name from remarks/host.
-        var nodeName = safeNodeName(parsed.remarks || parsed.host);
+        // Keep the human-readable remarks/custom name separate from the safe
+        // internal ID used as a filename.
+        var displayName = cleanDisplayName($("importNodeName").value, parsed.remarks || parsed.host);
+        var nodeId = safeNodeId(displayName);
         var config = collectConfig();
-        fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeName), {
+        config.node_name = displayName;
+        fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeId), {
             method: "POST",
             body: config
         }).then(function (res) {
             if (!res.success) throw new Error(res.message || t("import_fail"));
             $("importLinkInput").value = "";
+            $("importNodeName").value = "";
             loadConfig();
             loadNodes();
             loadStatus();
             loadCommand();
-            showToast(t("imported_remarks", {name: res.name || nodeName}), "success");
+            showToast(t("imported_remarks", {name: res.display_name || displayName}), "success");
         }).catch(function (err) {
             showToast((err && err.message) || t("import_fail"), "error");
         });
@@ -581,21 +600,24 @@
         }
         var html = "";
         nodes.forEach(function (node) {
-            var isActive = node.active || node.name === active;
+            var isActive = node.active || node.id === active;
+            var nodeId = node.id || node.name;
+            var displayName = node.display_name || node.name || nodeId;
             var upInfo = t("direct");
             if (node.upstream && node.upstream.enabled === "true") {
                 upInfo = (node.upstream.type || "http") + "://" + (node.upstream.addr || "?") + ":" + (node.upstream.port || "?");
             }
             html += '<div class="node-item' + (isActive ? " node-active" : "") + '">';
             html += '  <div class="node-info">';
-            html += '    <span class="node-name">' + escapeHtml(node.name) + (isActive ? ' <span class="node-badge">' + (currentLang === "zh" ? "使用中" : "ACTIVE") + '</span>' : "") + "</span>";
+            html += '    <span class="node-name">' + escapeHtml(displayName) + (isActive ? ' <span class="node-badge">' + (currentLang === "zh" ? "使用中" : "ACTIVE") + '</span>' : "") + "</span>";
             html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "http") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
             html += "  </div>";
             html += '  <div class="node-actions">';
-            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.editNode(\'' + escapeHtml(node.name) + '\')">' + t("edit_btn") + '</button>';
+            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.renameNode(\'' + escapeHtml(nodeId) + '\',\'' + escapeHtml(displayName) + '\')">' + (currentLang === "zh" ? "重命名" : "Rename") + '</button>';
+            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.editNode(\'' + escapeHtml(nodeId) + '\')">' + t("edit_btn") + '</button>';
             if (!isActive) {
-                html += '    <button class="btn btn-sm btn-primary" onclick="window.__app.switchNode(\'' + escapeHtml(node.name) + '\')">' + t("switch_btn") + '</button>';
-                html += '    <button class="btn btn-sm btn-danger" onclick="window.__app.deleteNode(\'' + escapeHtml(node.name) + '\')">' + t("delete_btn") + '</button>';
+                html += '    <button class="btn btn-sm btn-primary" onclick="window.__app.switchNode(\'' + escapeHtml(nodeId) + '\')">' + t("switch_btn") + '</button>';
+                html += '    <button class="btn btn-sm btn-danger" onclick="window.__app.deleteNode(\'' + escapeHtml(nodeId) + '\')">' + t("delete_btn") + '</button>';
             } else {
                 html += '    <span class="text-muted">' + t("in_use") + '</span>';
             }
@@ -612,13 +634,14 @@
 
     function saveNode() {
         var rawName = $("nodeSaveName").value.trim();
-        var name = safeNodeName(rawName);
+        var name = safeNodeId(rawName);
         if (!rawName) {
             showToast(t("enter_node_name"), "error");
             return;
         }
         // First save current config, then save as node
         var config = collectConfig();
+        config.node_name = cleanDisplayName(rawName, name);
         fetchJSON("/cgi-bin/api?endpoint=config", {
             method: "POST",
             body: config
@@ -680,6 +703,23 @@
             }
         }).catch(function () {
             showToast(t("switch_failed"), "error");
+        });
+    }
+
+    function renameNode(name, currentDisplayName) {
+        var nextName = prompt(currentLang === "zh" ? "输入新的节点名称" : "Enter new node name", currentDisplayName || "");
+        if (nextName === null) return;
+        nextName = cleanDisplayName(nextName, currentDisplayName);
+        fetchJSON("/cgi-bin/api?endpoint=nodes/rename", {
+            method: "POST",
+            body: { name: name, display_name: nextName }
+        }).then(function (res) {
+            if (!res.success) throw new Error(res.message || "Rename failed");
+            loadNodes();
+            loadConfig();
+            loadStatus();
+        }).catch(function (err) {
+            showToast((err && err.message) || "Rename failed", "error");
         });
     }
 
@@ -810,7 +850,7 @@
         $("btnNodeSave").addEventListener("click", saveNode);
         $("btnRefreshNodes").addEventListener("click", loadNodes);
         // Expose for inline onclick handlers
-        window.__app = { editNode: editNode, switchNode: switchNode, deleteNode: deleteNode };
+        window.__app = { renameNode: renameNode, editNode: editNode, switchNode: switchNode, deleteNode: deleteNode };
 
         loadStatus();
         loadConfig();

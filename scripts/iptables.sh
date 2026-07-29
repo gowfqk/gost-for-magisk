@@ -14,6 +14,11 @@ jval() {
     grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
 }
 
+jsection_val() {
+    _section="$1" _key="$2"
+    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^}]*" | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
+}
+
 IPT=$(command -v iptables 2>/dev/null)
 [ -z "$IPT" ] && IPT="/system/bin/iptables"
 if [ ! -x "$IPT" ]; then
@@ -51,6 +56,22 @@ cleanup_rules
     cleanup_rules
     exit 1
 }
+ROUTING_ENABLED=$(jsection_val routing enabled)
+DIRECT_UIDS=$(jsection_val routing direct_uids | tr -d ' []')
+if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+    OLD_IFS=$IFS
+    IFS=','
+    for UID_VALUE in $DIRECT_UIDS; do
+        case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+        "$IPT" -t nat -A "$CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN || {
+            IFS=$OLD_IFS
+            log_msg "ERROR: failed to add direct UID $UID_VALUE"
+            cleanup_rules
+            exit 1
+        }
+    done
+    IFS=$OLD_IFS
+fi
 "$IPT" -t nat -A "$CHAIN" -d 0.0.0.0/8 -j RETURN
 "$IPT" -t nat -A "$CHAIN" -d 10.0.0.0/8 -j RETURN
 "$IPT" -t nat -A "$CHAIN" -d 100.64.0.0/10 -j RETURN
