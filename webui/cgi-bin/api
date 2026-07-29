@@ -19,8 +19,27 @@ NODES_DIR="$MODDIR/gost/nodes"
 ACTIVE_FILE="$MODDIR/gost/active"
 LOG_PATH="$MODDIR/logs/gost.log"
 PIDFILE="/tmp/gost.pid"
+PERSIST_BIN="/data/adb/gost_proxy/gost"
 
 mkdir -p "$NODES_DIR"
+
+usable_gost_binary() {
+    _bin="$1"
+    [ -s "$_bin" ] && ! grep -q "Placeholder" "$_bin" 2>/dev/null
+}
+
+# A root manager may replace the module directory while the persistent copy is
+# still intact. Restore it lazily so WebUI status and start actions agree.
+ensure_gost_binary() {
+    usable_gost_binary "$MODDIR/gost/gost" && return 0
+    if usable_gost_binary "$PERSIST_BIN"; then
+        mkdir -p "$MODDIR/gost" || return 1
+        cp "$PERSIST_BIN" "$MODDIR/gost/gost" || return 1
+        chmod 755 "$MODDIR/gost/gost" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
 
 # ---- Parse query string ----
 ENDPOINT=""
@@ -173,9 +192,7 @@ case "$ENDPOINT" in
         GEODATA_READY="false"
         [ -f "$MODDIR/gost/geodata/direct-rules.txt" ] && GEODATA_READY="true"
         GOST_BINARY_READY="false"
-        if [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
-            GOST_BINARY_READY="true"
-        fi
+        ensure_gost_binary && GOST_BINARY_READY="true"
         GOST_DOWNLOADING="false"
         [ -d "/tmp/gost-download.lock" ] && GOST_DOWNLOADING="true"
         json_header
@@ -403,7 +420,7 @@ case "$ENDPOINT" in
         json_header
         if [ "$REQUEST_METHOD" != "POST" ]; then
             printf '{"success":false,"message":"POST required"}'
-        elif [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+        elif ensure_gost_binary; then
             printf '{"success":false,"message":"Gost binary is already installed"}'
         elif [ -d "$DOWNLOAD_LOCK" ]; then
             printf '{"success":false,"message":"Download already in progress"}'
