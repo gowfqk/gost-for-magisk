@@ -38,12 +38,15 @@ ui_print ""
 
 # ---- Preserve existing config before extraction ----
 PRESERVE_DIR="/tmp/gost_preserve"
+PERSIST_DIR="/data/adb/gost_proxy"
 rm -rf "$PRESERVE_DIR"
-mkdir -p "$PRESERVE_DIR"
+mkdir -p "$PRESERVE_DIR" "$PERSIST_DIR"
 
-# Preserve a usable installed binary independently of config.json. Search all
-# known module roots because update staging can hide the old module directory.
+# Preserve a usable installed binary independently of config.json. WebUI keeps
+# a persistent copy outside the module directory, so root-manager replacement
+# cannot remove the only copy during updates.
 for _binary in \
+    "$PERSIST_DIR/gost" \
     "$OLD_MODDIR/gost/gost" \
     /data/adb/modules/gost_proxy/gost/gost \
     /data/adb/modules_update/gost_proxy/gost/gost \
@@ -53,8 +56,12 @@ for _binary in \
     /data/adb/ap/modules_update/gost_proxy/gost/gost; do
     [ -s "$_binary" ] || continue
     grep -q "Placeholder" "$_binary" 2>/dev/null && continue
-    cp "$_binary" "$PRESERVE_DIR/gost_bin" && ui_print "- Found existing gost binary: $_binary"
-    break
+    if cp "$_binary" "$PRESERVE_DIR/gost_bin"; then
+        cp "$_binary" "$PERSIST_DIR/gost" 2>/dev/null
+        chmod 755 "$PERSIST_DIR/gost" 2>/dev/null
+        ui_print "- Found existing gost binary: $_binary"
+        break
+    fi
 done
 
 # If the old module directory is hidden during an update, recover the binary

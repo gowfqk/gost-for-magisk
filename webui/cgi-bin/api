@@ -399,6 +399,7 @@ case "$ENDPOINT" in
         DOWNLOAD_SCRIPT="$MODDIR/scripts/download_gost.sh"
         DOWNLOAD_LOCK="/tmp/gost-download.lock"
         DOWNLOAD_LOG="$MODDIR/logs/gost-download.log"
+        PERSIST_DIR="/data/adb/gost_proxy"
         json_header
         if [ "$REQUEST_METHOD" != "POST" ]; then
             printf '{"success":false,"message":"POST required"}'
@@ -420,6 +421,9 @@ case "$ENDPOINT" in
                 _result=$?
                 if [ "$_result" -eq 0 ] && [ -s "$MODDIR/gost/gost" ]; then
                     chmod 755 "$MODDIR/gost/gost" 2>/dev/null
+                    mkdir -p "$PERSIST_DIR"
+                    cp "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
+                    chmod 755 "$PERSIST_DIR/gost" 2>/dev/null
                 fi
                 rm -rf "$DOWNLOAD_LOCK"
             ) >/dev/null 2>&1 &

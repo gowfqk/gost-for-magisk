@@ -265,7 +265,11 @@ download_binary() {
 
     # GitHub's release API exposes an official sha256 digest for each asset.
     # Mirrors are transport fallbacks only; their content must match GitHub.
-    EXPECTED_SHA256=$(printf '%s' "$RAW_JSON" | tr -d '\n\r' | sed 's/},{/}\n{/g' | grep "\"name\"[[:space:]]*:[[:space:]]*\"${ASSET_NAME}\"" | grep -o '"digest"[[:space:]]*:[[:space:]]*"sha256:[0-9A-Fa-f]*"' | head -1 | sed 's/.*sha256://; s/"$//')
+    # Compact whitespace and split at each asset name. Splitting on `},{` is
+    # incorrect because every asset contains nested uploader objects and may
+    # leave the checksums.txt digest on the same line as the requested asset.
+    EXPECTED_SHA256=$(printf '%s' "$RAW_JSON" | tr -d '[:space:]' | sed 's/,"name":/\
+"name":/g' | grep "^\"name\":\"${ASSET_NAME}\"" | grep -o '"digest":"sha256:[0-9A-Fa-f]*"' | head -1 | sed 's/.*sha256://; s/"$//')
     if [ -z "$EXPECTED_SHA256" ]; then
         err "Official SHA256 digest not found for $ASSET_NAME"
         rm -rf "$TMPDIR"
