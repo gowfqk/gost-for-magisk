@@ -44,6 +44,10 @@
         "bypass": [],
         "direct_uids": []
     },
+    "geodata": {
+        "enabled": false,
+        "auto_update": false
+    },
     "advanced": {
         "log_level": "info",
         "multi_listen": []

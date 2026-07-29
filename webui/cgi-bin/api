@@ -164,9 +164,12 @@ case "$ENDPOINT" in
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         WP=$(jval webui_port);  [ -z "$WP" ] && WP="8080"
         ACTIVE_NODE=$(get_active_node)
+        GEODATA_EN=$(jsection_val geodata enabled)
+        GEODATA_READY="false"
+        [ -f "$MODDIR/gost/geodata/direct-rules.txt" ] && GEODATA_READY="true"
         json_header
-        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s","active_node":"%s"}' \
-            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA" "$ACTIVE_NODE"
+        printf '{"gost":{"status":"%s","pid":"%s"},"webui":{"status":"running","port":%s},"arch":"%s","listen_port":%s,"proxy_type":"%s","listen_addr":"%s","active_node":"%s","geodata_enabled":"%s","geodata_ready":"%s"}' \
+            "$GOST_STATUS" "$GOST_PID" "$WP" "$ARCH" "$LP" "$PT" "$LA" "$ACTIVE_NODE" "$GEODATA_EN" "$GEODATA_READY"
         ;;
 
     config)
@@ -400,44 +403,87 @@ case "$ENDPOINT" in
         PT="redirect"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
-        # Build full command preview
-        CMD="-L ${PT}://${LA}:${LP}"
+        # Check if geodata config file mode would be used
+        GEODATA_EN=$(jsection_val geodata enabled)
         UP_EN=$(jsection_val upstream enabled)
-        if [ "$UP_EN" = "true" ]; then
-            UP_TYPE=$(jsection_val upstream type); [ -z "$UP_TYPE" ] && UP_TYPE="http"
-            UP_ADDR=$(jsection_val upstream addr)
-            UP_PORT=$(jsection_val upstream port)
-            UP_USER=$(jsection_val upstream username)
-            UP_AUTH=""
-            if [ -n "$UP_USER" ]; then
-                UP_AUTH="${UP_USER}:***@"
+        if [ "$GEODATA_EN" = "true" ] && [ -f "$MODDIR/gost/geodata/direct-rules.txt" ] && [ "$UP_EN" = "true" ]; then
+            CMD="gost -C $MODDIR/gost/runtime.json (geodata bypass: file-based, 70k+ rules)"
+            CMD_ESCAPED=$(printf '%s' "$CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            json_header
+            printf '{"command":"%s"}' "$CMD_ESCAPED"
+        else
+            # Build full command preview (command-line mode)
+            CMD="-L ${PT}://${LA}:${LP}"
+            if [ "$UP_EN" = "true" ]; then
+                UP_TYPE=$(jsection_val upstream type); [ -z "$UP_TYPE" ] && UP_TYPE="http"
+                UP_ADDR=$(jsection_val upstream addr)
+                UP_PORT=$(jsection_val upstream port)
+                UP_USER=$(jsection_val upstream username)
+                UP_AUTH=""
+                if [ -n "$UP_USER" ]; then
+                    UP_AUTH="${UP_USER}:***@"
+                fi
+                UP_SCHEME="$UP_TYPE"
+                case "$UP_TYPE" in
+                    *+ws*|*+wss*) ;;
+                    *)
+                        UP_WS=$(jsection_val upstream ws_path)
+                        [ -n "$UP_WS" ] && UP_SCHEME="${UP_SCHEME}+ws"
+                        ;;
+                esac
+                CMD="${CMD} -F ${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
+                UP_WS=$(jsection_val upstream ws_path)
+                CMD="${CMD}?resolver=223.5.5.5%2C1.1.1.1"
+                if [ -n "$UP_WS" ]; then
+                    CMD="${CMD}&path=${UP_WS}"
+                fi
+                UP_WS_HOST=$(jsection_val upstream ws_host)
+                [ -n "$UP_WS_HOST" ] && CMD="${CMD}&host=${UP_WS_HOST}"
+                case "$UP_TYPE" in
+                    socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
+                        CMD="${CMD}&notls=true"
+                        ;;
+                esac
             fi
-            # Don't append +ws if type already contains ws/wss
-            UP_SCHEME="$UP_TYPE"
-            case "$UP_TYPE" in
-                *+ws*|*+wss*) ;;
-                *)
-                    UP_WS=$(jsection_val upstream ws_path)
-                    [ -n "$UP_WS" ] && UP_SCHEME="${UP_SCHEME}+ws"
-                    ;;
-            esac
-            CMD="${CMD} -F ${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
-            UP_WS=$(jsection_val upstream ws_path)
-            CMD="${CMD}?resolver=223.5.5.5%2C1.1.1.1"
-            if [ -n "$UP_WS" ]; then
-                CMD="${CMD}&path=${UP_WS}"
-            fi
-            UP_WS_HOST=$(jsection_val upstream ws_host)
-            [ -n "$UP_WS_HOST" ] && CMD="${CMD}&host=${UP_WS_HOST}"
-            case "$UP_TYPE" in
-                socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
-                    CMD="${CMD}&notls=true"
-                    ;;
-            esac
+            CMD_ESCAPED=$(printf '%s' "$CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            json_header
+            printf '{"command":"%s"}' "$CMD_ESCAPED"
         fi
-        CMD_ESCAPED=$(printf '%s' "$CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        ;;
+
+    geodata/status)
+        GEODATA_DIR="$MODDIR/gost/geodata"
+        STATUS_FILE="$GEODATA_DIR/status.json"
+        UPDATING=0
+        ls -d "$GEODATA_DIR"/.update.* >/dev/null 2>&1 && UPDATING=1
         json_header
-        printf '{"command":"%s"}' "$CMD_ESCAPED"
+        if [ "$UPDATING" = "1" ]; then
+            if [ -f "$STATUS_FILE" ]; then
+                EXISTING=$(cat "$STATUS_FILE" 2>/dev/null)
+                printf '%s' "$EXISTING" | sed 's/}/,"updating":true}/'
+            else
+                printf '{"success":false,"updating":true,"message":"Update in progress"}'
+            fi
+        elif [ -f "$STATUS_FILE" ]; then
+            cat "$STATUS_FILE"
+        else
+            printf '{"success":false,"updating":false,"message":"No geodata downloaded yet"}'
+        fi
+        ;;
+
+    geodata/update)
+        GEODATA_DIR="$MODDIR/gost/geodata"
+        UPDATE_SCRIPT="$MODDIR/scripts/update_geodata.sh"
+        json_header
+        if ls -d "$GEODATA_DIR"/.update.* >/dev/null 2>&1; then
+            printf '{"success":false,"message":"Update already in progress"}'
+        elif [ ! -f "$UPDATE_SCRIPT" ]; then
+            printf '{"success":false,"message":"update_geodata.sh not found"}'
+        else
+            chmod 755 "$UPDATE_SCRIPT" 2>/dev/null
+            sh "$UPDATE_SCRIPT" "$MODDIR" >"$MODDIR/logs/geodata-update.log" 2>&1 &
+            printf '{"success":true,"message":"Update started"}'
+        fi
         ;;
 
     config/import)

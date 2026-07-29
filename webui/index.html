@@ -364,6 +364,32 @@
                     </div>
                 </div>
                 <div class="card">
+                    <div class="card-header"><h3>GeoData Auto-Split</h3></div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" id="geodataEnabled">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">Enable GeoData bypass (China direct)</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="toggle">
+                                <input type="checkbox" id="geodataAutoUpdate">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="toggle-label">Auto-update on boot</span>
+                        </div>
+                        <div class="form-group">
+                            <pre class="command-preview" id="geodataStatus" style="white-space:pre-wrap;font-size:12px">-</pre>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-primary" id="btnGeodataUpdate">Update GeoData Now</button>
+                        </div>
+                        <p class="text-muted">Downloads GeoSite/GeoIP databases, extracts China domains and CIDRs, and uses them as bypass rules. Requires upstream proxy enabled. File-based bypass supports 70k+ rules.</p>
+                    </div>
+                </div>
+                <div class="card">
                     <div class="card-header"><h3 data-i18n="multi_port_listen">Multi-Port Listen</h3></div>
                     <div class="card-body">
                         <div class="form-group">

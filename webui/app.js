@@ -272,6 +272,9 @@
         $("routingEnabled").checked = !!routing.enabled;
         $("routingBypass").value = (routing.bypass || []).join("\n");
         $("routingDirectUids").value = (routing.direct_uids || []).join(",");
+        var geodata = config.geodata || {};
+        $("geodataEnabled").checked = !!geodata.enabled;
+        $("geodataAutoUpdate").checked = !!geodata.auto_update;
 
         updateProxyTypeFields();
     }
@@ -333,6 +336,10 @@
                 enabled: $("routingEnabled").checked,
                 bypass: splitList($("routingBypass").value),
                 direct_uids: splitList($("routingDirectUids").value)
+            },
+            geodata: {
+                enabled: $("geodataEnabled").checked,
+                auto_update: $("geodataAutoUpdate").checked
             },
             advanced: {
                 log_level: $("advLogLevel").value,
@@ -783,6 +790,75 @@
             });
     }
 
+    var geodataPollInterval = null;
+
+    function loadGeodataStatus() {
+        fetchJSON("/cgi-bin/api?endpoint=geodata/status")
+            .then(function (data) {
+                var el = $("geodataStatus");
+                if (data.updating) {
+                    el.textContent = "Updating... please wait";
+                    el.className = "command-preview";
+                    if (!geodataPollInterval) {
+                        geodataPollInterval = setInterval(function () {
+                            loadGeodataStatus();
+                        }, 3000);
+                    }
+                    return;
+                }
+                if (geodataPollInterval) {
+                    clearInterval(geodataPollInterval);
+                    geodataPollInterval = null;
+                }
+                if (data.success) {
+                    var lines = [
+                        "Last update: " + (data.updated_at || "unknown"),
+                        "Rules: " + (data.rules || 0) + " (" + (data.domain_rules || 0) + " domains, " + (data.cidr_rules || 0) + " CIDRs)",
+                        "GeoSite: " + (data.geosite_tag || "?"),
+                        "GeoIP: " + (data.geoip_tag || "?"),
+                        "GeoView: " + (data.geoview || "?")
+                    ];
+                    el.textContent = lines.join("\n");
+                    el.className = "command-preview test-success";
+                } else {
+                    el.textContent = data.message || "Not downloaded";
+                    el.className = "command-preview";
+                }
+            })
+            .catch(function () {
+                $("geodataStatus").textContent = "Failed to load status";
+            });
+    }
+
+    function updateGeodata() {
+        var btn = $("btnGeodataUpdate");
+        btn.disabled = true;
+        btn.textContent = "Updating...";
+        fetchJSON("/cgi-bin/api?endpoint=geodata/update", { method: "POST" })
+            .then(function (res) {
+                if (res.success) {
+                    showToast("GeoData update started", "success");
+                    loadGeodataStatus();
+                } else {
+                    showToast(res.message || "Update failed", "error");
+                    btn.disabled = false;
+                    btn.textContent = "Update GeoData Now";
+                }
+            })
+            .catch(function () {
+                showToast("Update request failed", "error");
+                btn.disabled = false;
+                btn.textContent = "Update GeoData Now";
+            })
+            .then(function () {
+                // Re-enable button after polling completes
+                setTimeout(function () {
+                    btn.disabled = false;
+                    btn.textContent = "Update GeoData Now";
+                }, 5000);
+            });
+    }
+
     function startAutoRefresh() {
         if (refreshInterval) clearInterval(refreshInterval);
         refreshInterval = setInterval(function () {
@@ -841,6 +917,8 @@
 
         $("btnRefreshLogs").addEventListener("click", loadLogs);
 
+        $("btnGeodataUpdate").addEventListener("click", updateGeodata);
+
         // Language toggle
         try { currentLang = localStorage.getItem("gost_lang") || "en"; } catch (e) {}
         applyLanguage();
@@ -856,6 +934,7 @@
         loadConfig();
         loadCommand();
         loadNodes();
+        loadGeodataStatus();
         startAutoRefresh();
         startLogAutoRefresh();
     }

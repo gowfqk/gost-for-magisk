@@ -40,3 +40,10 @@ else
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] service.sh completed" >> "$LOGFILE"
+
+# ---- Optional: auto-update geodata on boot ----
+GEODATA_AUTO=$(grep -o '"auto_update"[[:space:]]*:[[:space:]]*true' "$MODDIR/gost/config.json" 2>/dev/null)
+if [ -n "$GEODATA_AUTO" ] && [ -f "$MODDIR/scripts/update_geodata.sh" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] geodata auto-update enabled, starting background update" >> "$LOGFILE"
+    sh "$MODDIR/scripts/update_geodata.sh" "$MODDIR" >> "$MODDIR/logs/geodata-update.log" 2>&1 &
+fi

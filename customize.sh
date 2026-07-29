@@ -41,8 +41,18 @@ if [ -f "$OLD_MODDIR/gost/config.json" ]; then
     if [ -f "$OLD_MODDIR/gost/gost" ]; then
         cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost_bin"
     fi
-    
-    ui_print "- Config and nodes preserved."
+
+    # Preserve geodata cache (avoid re-download)
+    if [ -d "$OLD_MODDIR/gost/geodata" ]; then
+        cp -r "$OLD_MODDIR/gost/geodata" "$PRESERVE_DIR/geodata"
+    fi
+
+    # Preserve geoview tool
+    if [ -f "$OLD_MODDIR/gost/tools/geoview" ]; then
+        cp "$OLD_MODDIR/gost/tools/geoview" "$PRESERVE_DIR/geoview"
+    fi
+
+    ui_print "- Config, nodes, and geodata preserved."
 else
     ui_print "- No existing config found (fresh install)."
 fi
@@ -78,13 +88,13 @@ ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
 # touching preserved data or attempting a binary download.
-for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/download_gost.sh webui/cgi-bin/api gost/nodes/default.json.example; do
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
     fi
 done
 
-mkdir -p "$MODDIR/gost/nodes" "$MODDIR/logs"
+mkdir -p "$MODDIR/gost/nodes" "$MODDIR/gost/geodata" "$MODDIR/gost/tools" "$MODDIR/logs"
 
 # ---- Restore preserved config ----
 if [ -f "$PRESERVE_DIR/config.json" ]; then
@@ -107,7 +117,18 @@ if [ -f "$PRESERVE_DIR/config.json" ]; then
             ui_print "- Restored existing gost binary."
         fi
     fi
-    
+
+    # Restore geodata cache
+    mkdir -p "$MODDIR/gost/geodata" "$MODDIR/gost/tools"
+    if [ -d "$PRESERVE_DIR/geodata" ]; then
+        cp -r "$PRESERVE_DIR/geodata/"* "$MODDIR/gost/geodata/" 2>/dev/null
+        ui_print "- Restored geodata cache."
+    fi
+    if [ -f "$PRESERVE_DIR/geoview" ]; then
+        cp "$PRESERVE_DIR/geoview" "$MODDIR/gost/tools/geoview"
+        chmod 755 "$MODDIR/gost/tools/geoview"
+    fi
+
     ui_print "- Config restored successfully."
 fi
 
@@ -165,6 +186,7 @@ chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/test_proxy.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
 chmod 755 "$MODDIR/scripts/download_gost.sh"
+chmod 755 "$MODDIR/scripts/update_geodata.sh"
 chmod 755 "$MODDIR/webui/server.sh"
 chmod 755 "$MODDIR/webui/cgi-bin/api" 2>/dev/null
 chmod 755 "$MODDIR/post-fs-data.sh"

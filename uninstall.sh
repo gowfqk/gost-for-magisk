@@ -25,6 +25,9 @@ stop_owned_pid() {
 stop_owned_pid /tmp/gost.pid "$MODDIR/gost/gost" "gost process"
 stop_owned_pid /tmp/gost-webui.pid "$MODDIR/webui/server.sh" "WebUI process"
 
+# Clean up geodata update temp directories
+rm -rf "$MODDIR/gost/geodata"/.update.* 2>/dev/null
+
 rm -f /tmp/gost.pid
 rm -f /tmp/gost-webui.pid
 
