@@ -14,7 +14,13 @@ jval() {
     grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
 }
 
+TEST_CLIENT=""
+cleanup() {
+    [ -n "$TEST_CLIENT" ] && rm -f "$TEST_CLIENT" 2>/dev/null
+}
+
 fail() {
+    cleanup
     printf '{"success":false,"stage":"%s","message":"%s"}' "$1" "$(json_escape "$2")"
     exit 0
 }
@@ -39,10 +45,18 @@ done
 [ -z "$BB" ] && BB=$(command -v busybox 2>/dev/null)
 [ -n "$BB" ] || fail client "busybox not found"
 
+# /data/adb is intentionally inaccessible to Android shell UID 2000 on many
+# Magisk/KernelSU setups. Copy BusyBox to shell-accessible storage for this
+# one diagnostic request, then remove it immediately.
+TEST_CLIENT="/data/local/tmp/gost-test-busybox-$$"
+cp "$BB" "$TEST_CLIENT" 2>/dev/null || fail client "failed to stage busybox in /data/local/tmp"
+chown 2000:2000 "$TEST_CLIENT" 2>/dev/null || true
+chmod 755 "$TEST_CLIENT" 2>/dev/null || fail client "failed to make staged busybox executable"
+
 # The module/API runs as root and UID 0 is deliberately bypassed to prevent
 # gost's own upstream connections looping. Run the request as Android shell
 # UID 2000 so it traverses the OUTPUT transparent redirect rule.
-TEST_CMD="$BB wget -q -T 12 -O /dev/null $TEST_URL"
+TEST_CMD="$TEST_CLIENT wget -q -T 12 -O /dev/null $TEST_URL"
 START=$(date +%s 2>/dev/null)
 TEST_OUTPUT=$(su 2000 -c "$TEST_CMD" 2>&1)
 RC=$?
@@ -53,5 +67,6 @@ if [ "$RC" -ne 0 ]; then
     fail request "proxy request failed (code=$RC): $TEST_OUTPUT"
 fi
 
+cleanup
 printf '{"success":true,"stage":"complete","message":"Transparent proxy request succeeded","listen_port":%s,"elapsed":%s,"test_url":"%s"}' \
     "$LISTEN_PORT" "$ELAPSED" "$TEST_URL"
