@@ -5,7 +5,14 @@
 # through a descriptor/path that a second unzip process cannot reopen.
 SKIPUNZIP=0
 
-MODDIR=${MODPATH}
+# KernelSU may expose MODPATH as a path relative to /data/adb (for example
+# modules_update/gost_proxy). Normalize it before any file checks or writes.
+case "$MODPATH" in
+    /*) MODDIR="$MODPATH" ;;
+    *)  MODDIR="/data/adb/$MODPATH" ;;
+esac
+
+ui_print "- Target module directory: $MODDIR"
 
 # ---- Detect old module path (for config preservation on update) ----
 # Different root managers expose the currently installed module in different
@@ -49,6 +56,25 @@ for _binary in \
     cp "$_binary" "$PRESERVE_DIR/gost_bin" && ui_print "- Found existing gost binary: $_binary"
     break
 done
+
+# If the old module directory is hidden during an update, recover the binary
+# from a currently running gost process. /proc/<pid>/exe remains accessible
+# even when the original path has been replaced or moved by the root manager.
+if [ ! -s "$PRESERVE_DIR/gost_bin" ]; then
+    for _pid_dir in /proc/[0-9]*; do
+        _proc_exe=$(readlink "$_pid_dir/exe" 2>/dev/null)
+        case "$_proc_exe" in
+            */gost|*/gost\ \(deleted\)) ;;
+            *) continue ;;
+        esac
+        [ -s "$_pid_dir/exe" ] || continue
+        grep -q "Placeholder" "$_pid_dir/exe" 2>/dev/null && continue
+        if cp "$_pid_dir/exe" "$PRESERVE_DIR/gost_bin" 2>/dev/null; then
+            ui_print "- Recovered running gost binary: $_proc_exe"
+            break
+        fi
+    done
+fi
 
 # Also reuse a manually installed gost from PATH when no module copy exists.
 if [ ! -s "$PRESERVE_DIR/gost_bin" ]; then
