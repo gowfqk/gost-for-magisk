@@ -59,6 +59,25 @@
             enter_link: "Please enter a proxy link", link_parse_fail: "Parse failed, check format",
             imported_remarks: "Imported: {name}", invalid_json: "Invalid JSON file",
             no_logs: "No logs.", save_failed_msg: "Save failed: {msg}",
+            transparent_proxy_tcp: "Transparent Proxy (TCP)",
+            transparent_proxy_hint: "Local TCP traffic is captured automatically with iptables; apps do not need SOCKS settings.",
+            optional: "(optional)", shadowsocks_password: "Shadowsocks password",
+            node_name_from_remarks: "Auto from link remarks",
+            webui: "WebUI", tcp_split_routing: "TCP Split Routing",
+            enable_custom_split_routing: "Enable custom split routing",
+            direct_rules: "Direct domains / IP / CIDR (one per line)",
+            direct_uids: "Direct Android UIDs (comma separated)",
+            split_routing_hint: "Domain/IP rules bypass the upstream chain. UID rules bypass transparent interception. TCP only.",
+            geodata_auto_split: "GeoData Auto-Split", geodata_enable: "Enable GeoData bypass (China direct)",
+            geodata_auto_update: "Auto-update on boot", geodata_update: "Update GeoData Now",
+            geodata_hint: "Downloads GeoSite/GeoIP databases, extracts China domains and CIDRs, and uses them as bypass rules. Requires upstream proxy enabled. File-based bypass supports 70k+ rules.",
+            updating: "Updating...", geodata_update_started: "GeoData update started",
+            geodata_update_failed: "Update failed", geodata_update_request_failed: "Update request failed",
+            geodata_updating_hint: "Updating... please wait", geodata_last_update: "Last update: {value}",
+            geodata_rules: "Rules: {rules} ({domains} domains, {cidrs} CIDRs)",
+            geodata_not_downloaded: "Not downloaded", geodata_status_load_failed: "Failed to load status",
+            pass: "PASS", fail: "FAIL", test_port: "Port: {value}", test_elapsed: "Elapsed: {value}s", test_url: "URL: {value}",
+            api_request_failed: "Request failed", rename: "Rename", rename_prompt: "Enter new node name", rename_failed: "Rename failed",
             lang_btn: "中"
         },
         zh: {
@@ -110,6 +129,25 @@
             enter_link: "请输入代理链接", link_parse_fail: "链接解析失败，请检查格式",
             imported_remarks: "已导入: {name}", invalid_json: "无效的 JSON 文件",
             no_logs: "暂无日志。", save_failed_msg: "保存失败: {msg}",
+            transparent_proxy_tcp: "透明代理（TCP）",
+            transparent_proxy_hint: "本机 TCP 流量会由 iptables 自动接管，应用无需配置 SOCKS 代理。",
+            optional: "（可选）", shadowsocks_password: "Shadowsocks 密码",
+            node_name_from_remarks: "自动读取链接备注",
+            webui: "WebUI", tcp_split_routing: "TCP 分流",
+            enable_custom_split_routing: "启用自定义分流",
+            direct_rules: "直连域名 / IP / CIDR（每行一条）",
+            direct_uids: "直连 Android UID（逗号分隔）",
+            split_routing_hint: "域名/IP 规则会绕过上游链路；UID 规则会绕过透明接管。仅支持 TCP。",
+            geodata_auto_split: "GeoData 自动分流", geodata_enable: "启用 GeoData 分流（中国大陆直连）",
+            geodata_auto_update: "开机自动更新", geodata_update: "立即更新 GeoData",
+            geodata_hint: "下载 GeoSite/GeoIP 数据库，提取中国大陆域名和 CIDR，并作为直连分流规则。需要先启用上游代理。文件规则支持 7 万条以上。",
+            updating: "更新中…", geodata_update_started: "GeoData 更新已开始",
+            geodata_update_failed: "更新失败", geodata_update_request_failed: "更新请求失败",
+            geodata_updating_hint: "正在更新，请稍候…", geodata_last_update: "上次更新：{value}",
+            geodata_rules: "规则：{rules}（{domains} 条域名，{cidrs} 条 CIDR）",
+            geodata_not_downloaded: "尚未下载", geodata_status_load_failed: "加载状态失败",
+            pass: "通过", fail: "失败", test_port: "端口：{value}", test_elapsed: "耗时：{value} 秒", test_url: "网址：{value}",
+            api_request_failed: "请求失败", rename: "重命名", rename_prompt: "输入新的节点名称", rename_failed: "重命名失败",
             lang_btn: "EN"
         }
     };
@@ -620,7 +658,7 @@
             html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "http") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
             html += "  </div>";
             html += '  <div class="node-actions">';
-            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.renameNode(\'' + escapeHtml(nodeId) + '\',\'' + escapeHtml(displayName) + '\')">' + (currentLang === "zh" ? "重命名" : "Rename") + '</button>';
+            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.renameNode(\'' + escapeHtml(nodeId) + '\',\'' + escapeHtml(displayName) + '\')">' + t("rename") + '</button>';
             html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.editNode(\'' + escapeHtml(nodeId) + '\')">' + t("edit_btn") + '</button>';
             if (!isActive) {
                 html += '    <button class="btn btn-sm btn-primary" onclick="window.__app.switchNode(\'' + escapeHtml(nodeId) + '\')">' + t("switch_btn") + '</button>';
@@ -714,19 +752,19 @@
     }
 
     function renameNode(name, currentDisplayName) {
-        var nextName = prompt(currentLang === "zh" ? "输入新的节点名称" : "Enter new node name", currentDisplayName || "");
+        var nextName = prompt(t("rename_prompt"), currentDisplayName || "");
         if (nextName === null) return;
         nextName = cleanDisplayName(nextName, currentDisplayName);
         fetchJSON("/cgi-bin/api?endpoint=nodes/rename", {
             method: "POST",
             body: { name: name, display_name: nextName }
         }).then(function (res) {
-            if (!res.success) throw new Error(res.message || "Rename failed");
+            if (!res.success) throw new Error(res.message || t("rename_failed"));
             loadNodes();
             loadConfig();
             loadStatus();
         }).catch(function (err) {
-            showToast((err && err.message) || "Rename failed", "error");
+            showToast((err && err.message) || t("rename_failed"), "error");
         });
     }
 
@@ -757,17 +795,17 @@
         fetchJSON("/cgi-bin/api?endpoint=test", { method: "POST" })
             .then(function (res) {
                 var lines = [
-                    (res.success ? "PASS" : "FAIL") + " [" + (res.stage || "unknown") + "]",
+                    (res.success ? t("pass") : t("fail")) + " [" + (res.stage || "unknown") + "]",
                     res.message || "",
-                    res.listen_port ? "Port: " + res.listen_port : "",
-                    res.elapsed !== undefined ? "Elapsed: " + res.elapsed + "s" : "",
-                    res.test_url ? "URL: " + res.test_url : ""
+                    res.listen_port ? t("test_port", {value: res.listen_port}) : "",
+                    res.elapsed !== undefined ? t("test_elapsed", {value: res.elapsed}) : "",
+                    res.test_url ? t("test_url", {value: res.test_url}) : ""
                 ].filter(Boolean);
                 result.textContent = lines.join("\n");
                 result.className = "command-preview " + (res.success ? "test-success" : "test-failure");
             })
             .catch(function (err) {
-                result.textContent = "FAIL [api]\n" + ((err && err.message) || "Request failed");
+                result.textContent = t("fail") + " [api]\n" + ((err && err.message) || t("api_request_failed"));
                 result.className = "command-preview test-failure";
             })
             .then(function () { button.disabled = false; });
@@ -797,7 +835,7 @@
             .then(function (data) {
                 var el = $("geodataStatus");
                 if (data.updating) {
-                    el.textContent = "Updating... please wait";
+                    el.textContent = t("geodata_updating_hint");
                     el.className = "command-preview";
                     if (!geodataPollInterval) {
                         geodataPollInterval = setInterval(function () {
@@ -812,8 +850,8 @@
                 }
                 if (data.success) {
                     var lines = [
-                        "Last update: " + (data.updated_at || "unknown"),
-                        "Rules: " + (data.rules || 0) + " (" + (data.domain_rules || 0) + " domains, " + (data.cidr_rules || 0) + " CIDRs)",
+                        t("geodata_last_update", {value: data.updated_at || "unknown"}),
+                        t("geodata_rules", {rules: data.rules || 0, domains: data.domain_rules || 0, cidrs: data.cidr_rules || 0}),
                         "GeoSite: " + (data.geosite_tag || "?"),
                         "GeoIP: " + (data.geoip_tag || "?"),
                         "GeoView: " + (data.geoview || "?")
@@ -821,40 +859,40 @@
                     el.textContent = lines.join("\n");
                     el.className = "command-preview test-success";
                 } else {
-                    el.textContent = data.message || "Not downloaded";
+                    el.textContent = data.message || t("geodata_not_downloaded");
                     el.className = "command-preview";
                 }
             })
             .catch(function () {
-                $("geodataStatus").textContent = "Failed to load status";
+                $("geodataStatus").textContent = t("geodata_status_load_failed");
             });
     }
 
     function updateGeodata() {
         var btn = $("btnGeodataUpdate");
         btn.disabled = true;
-        btn.textContent = "Updating...";
+        btn.textContent = t("updating");
         fetchJSON("/cgi-bin/api?endpoint=geodata/update", { method: "POST" })
             .then(function (res) {
                 if (res.success) {
-                    showToast("GeoData update started", "success");
+                    showToast(t("geodata_update_started"), "success");
                     loadGeodataStatus();
                 } else {
-                    showToast(res.message || "Update failed", "error");
+                    showToast(res.message || t("geodata_update_failed"), "error");
                     btn.disabled = false;
-                    btn.textContent = "Update GeoData Now";
+                    btn.textContent = t("geodata_update");
                 }
             })
             .catch(function () {
-                showToast("Update request failed", "error");
+                showToast(t("geodata_update_request_failed"), "error");
                 btn.disabled = false;
-                btn.textContent = "Update GeoData Now";
+                btn.textContent = t("geodata_update");
             })
             .then(function () {
                 // Re-enable button after polling completes
                 setTimeout(function () {
                     btn.disabled = false;
-                    btn.textContent = "Update GeoData Now";
+                    btn.textContent = t("geodata_update");
                 }, 5000);
             });
     }
