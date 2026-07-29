@@ -1,6 +1,9 @@
 #!/system/bin/sh
 
-SKIPUNZIP=1
+# Let Magisk/KernelSU extract the module before sourcing this script.
+# Manual unzip is intentionally avoided because some installers expose ZIPFILE
+# through a descriptor/path that a second unzip process cannot reopen.
+SKIPUNZIP=0
 
 MODDIR=${MODPATH}
 
@@ -71,15 +74,17 @@ esac
 ui_print "Detected gost architecture: $GOST_ARCH"
 ui_print ""
 
-ui_print "Creating module directories..."
-mkdir -p "$MODDIR/gost"
-mkdir -p "$MODDIR/webui"
-mkdir -p "$MODDIR/scripts"
-mkdir -p "$MODDIR/system"
-mkdir -p "$MODDIR/logs"
+ui_print "- Module files extracted by installer."
 
-ui_print "Extracting module files..."
-unzip -o "$ZIPFILE" -d "$MODDIR" >/dev/null 2>&1
+# Verify the standard installer actually populated the module directory before
+# touching preserved data or attempting a binary download.
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/download_gost.sh webui/cgi-bin/api gost/nodes/default.json.example; do
+    if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
+        abort "ERROR: Missing module file: $REQUIRED_FILE"
+    fi
+done
+
+mkdir -p "$MODDIR/gost/nodes" "$MODDIR/logs"
 
 # ---- Restore preserved config ----
 if [ -f "$PRESERVE_DIR/config.json" ]; then
