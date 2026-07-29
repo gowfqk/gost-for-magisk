@@ -247,9 +247,13 @@
         $("dashGostStatus").textContent = gostStatus;
         $("dashGostStatus").className = "info-value " + gostStatus;
         $("dashGostPid").textContent = gostPid;
-        $("dashGostBinary").textContent = data.gost && data.gost.binary_ready ? t("gost_binary_ready") : t("gost_binary_missing");
-        $("dashGostBinary").className = "info-value " + (data.gost && data.gost.binary_ready ? "running" : "stopped");
-        $("btnDownloadGost").disabled = !!(data.gost && (data.gost.binary_ready || data.gost.downloading));
+        // A running Gost process is definitive proof that the binary exists.
+        // This fallback also keeps the UI correct while an older API handler is
+        // still serving requests immediately after a module update.
+        var binaryReady = !!(data.gost && (data.gost.binary_ready || data.gost.status === "running"));
+        $("dashGostBinary").textContent = binaryReady ? t("gost_binary_ready") : t("gost_binary_missing");
+        $("dashGostBinary").className = "info-value " + (binaryReady ? "running" : "stopped");
+        $("btnDownloadGost").disabled = !!(data.gost && (binaryReady || data.gost.downloading));
         $("btnDownloadGost").textContent = data.gost && data.gost.downloading ? t("downloading_gost") : t("download_gost");
         $("dashWebuiStatus").textContent = data.webui ? data.webui.status : "-";
         $("dashWebuiStatus").className = "info-value " + (data.webui ? data.webui.status : "");

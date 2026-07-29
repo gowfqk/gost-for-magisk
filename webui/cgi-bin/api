@@ -192,7 +192,9 @@ case "$ENDPOINT" in
         GEODATA_READY="false"
         [ -f "$MODDIR/gost/geodata/direct-rules.txt" ] && GEODATA_READY="true"
         GOST_BINARY_READY="false"
-        ensure_gost_binary && GOST_BINARY_READY="true"
+        if [ "$GOST_STATUS" = "running" ] || ensure_gost_binary; then
+            GOST_BINARY_READY="true"
+        fi
         GOST_DOWNLOADING="false"
         [ -d "/tmp/gost-download.lock" ] && GOST_DOWNLOADING="true"
         json_header
