@@ -23,6 +23,13 @@ PRESERVE_DIR="/tmp/gost_preserve"
 rm -rf "$PRESERVE_DIR"
 mkdir -p "$PRESERVE_DIR"
 
+# Preserve a usable installed binary independently of config.json. Older or
+# manually installed modules may have gost locally without a saved config.
+if [ -s "$OLD_MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$OLD_MODDIR/gost/gost" 2>/dev/null; then
+    cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost_bin"
+    ui_print "- Found existing gost binary, preserving it."
+fi
+
 if [ -f "$OLD_MODDIR/gost/config.json" ]; then
     ui_print "- Found existing config, preserving..."
     cp "$OLD_MODDIR/gost/config.json" "$PRESERVE_DIR/config.json"
@@ -35,11 +42,6 @@ if [ -f "$OLD_MODDIR/gost/config.json" ]; then
     # Preserve active node file
     if [ -f "$OLD_MODDIR/gost/active" ]; then
         cp "$OLD_MODDIR/gost/active" "$PRESERVE_DIR/active"
-    fi
-    
-    # Preserve gost binary (avoid re-download if same arch)
-    if [ -f "$OLD_MODDIR/gost/gost" ]; then
-        cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost_bin"
     fi
 
     # Preserve geodata cache (avoid re-download)
@@ -96,7 +98,15 @@ done
 
 mkdir -p "$MODDIR/gost/nodes" "$MODDIR/gost/geodata" "$MODDIR/gost/tools" "$MODDIR/logs"
 
-# ---- Restore preserved config ----
+# ---- Restore preserved binary/config ----
+# The release ZIP intentionally does not bundle gost. Prefer the device-local
+# binary and only download when no usable binary is available.
+if [ -s "$PRESERVE_DIR/gost_bin" ]; then
+    cp "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"
+    chmod 755 "$MODDIR/gost/gost"
+    ui_print "- Reused existing gost binary; download will be skipped."
+fi
+
 if [ -f "$PRESERVE_DIR/config.json" ]; then
     ui_print "- Restoring preserved config..."
     cp "$PRESERVE_DIR/config.json" "$MODDIR/gost/config.json"
@@ -108,14 +118,6 @@ if [ -f "$PRESERVE_DIR/config.json" ]; then
     
     if [ -f "$PRESERVE_DIR/active" ]; then
         cp "$PRESERVE_DIR/active" "$MODDIR/gost/active"
-    fi
-    
-    # Restore gost binary if zip doesn't have a real one
-    if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
-        if [ -f "$PRESERVE_DIR/gost_bin" ]; then
-            cp "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"
-            ui_print "- Restored existing gost binary."
-        fi
     fi
 
     # Restore geodata cache
@@ -147,7 +149,7 @@ if [ ! -f "$MODDIR/gost/config.json" ]; then
 fi
 
 # ---- Handle gost binary ----
-if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+if [ ! -s "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
     ui_print ""
     ui_print "gost binary not found or is placeholder."
     ui_print "Attempting automatic download..."
@@ -157,7 +159,7 @@ if [ ! -f "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/
         sh "$MODDIR/scripts/download_gost.sh" "$MODDIR/gost" 2>&1 | while read -r line; do
             ui_print "$line"
         done
-        if [ -f "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+        if [ -s "$MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
             ui_print ""
             ui_print "gost binary downloaded successfully!"
         else
