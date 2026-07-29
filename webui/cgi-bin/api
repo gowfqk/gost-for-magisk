@@ -345,6 +345,16 @@ case "$ENDPOINT" in
         printf '{"logs":"%s"}' "$LOGS_ESCAPED"
         ;;
 
+    test)
+        TEST_SCRIPT="$MODDIR/scripts/test_proxy.sh"
+        json_header
+        if [ -f "$TEST_SCRIPT" ]; then
+            sh "$TEST_SCRIPT" "$MODDIR"
+        else
+            printf '{"success":false,"stage":"setup","message":"Proxy test script not found"}'
+        fi
+        ;;
+
     command)
         PT="redirect"
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"

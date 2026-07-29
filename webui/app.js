@@ -17,7 +17,9 @@
             status: "Status", gost: "Gost", configuration: "Configuration",
             proxy_type: "Proxy Type", listen: "Listen", port: "Port", node: "Node",
             system: "System", architecture: "Architecture", webui_port: "WebUI Port",
-            start: "Start", stop: "Stop", restart: "Restart", gost_command: "Gost Command",
+            start: "Start", stop: "Stop", restart: "Restart", test_proxy: "Test Proxy",
+            proxy_test_result: "Proxy Test Result", test_running: "Testing transparent proxy...",
+            gost_command: "Gost Command",
             type: "Type", http_proxy: "HTTP Proxy", socks5_proxy: "SOCKS5 Proxy",
             shadowsocks: "Shadowsocks", tls_tunnel: "TLS Tunnel", ws_tunnel: "WebSocket Tunnel",
             listen_addr: "Listen Address", listen_port: "Listen Port",
@@ -66,7 +68,9 @@
             status: "状态", gost: "Gost", configuration: "配置",
             proxy_type: "代理类型", listen: "监听", port: "端口", node: "节点",
             system: "系统", architecture: "架构", webui_port: "WebUI 端口",
-            start: "启动", stop: "停止", restart: "重启", gost_command: "Gost 命令",
+            start: "启动", stop: "停止", restart: "重启", test_proxy: "测试代理",
+            proxy_test_result: "代理测试结果", test_running: "正在测试透明代理……",
+            gost_command: "Gost 命令",
             type: "类型", http_proxy: "HTTP 代理", socks5_proxy: "SOCKS5 代理",
             shadowsocks: "Shadowsocks", tls_tunnel: "TLS 隧道", ws_tunnel: "WebSocket 隧道",
             listen_addr: "监听地址", listen_port: "监听端口",
@@ -696,6 +700,32 @@
         });
     }
 
+    function testProxy() {
+        var button = $("btnTestProxy");
+        var card = $("proxyTestCard");
+        var result = $("proxyTestResult");
+        button.disabled = true;
+        card.style.display = "";
+        result.textContent = t("test_running");
+        fetchJSON("/cgi-bin/api?endpoint=test", { method: "POST" })
+            .then(function (res) {
+                var lines = [
+                    (res.success ? "PASS" : "FAIL") + " [" + (res.stage || "unknown") + "]",
+                    res.message || "",
+                    res.listen_port ? "Port: " + res.listen_port : "",
+                    res.elapsed !== undefined ? "Elapsed: " + res.elapsed + "s" : "",
+                    res.test_url ? "URL: " + res.test_url : ""
+                ].filter(Boolean);
+                result.textContent = lines.join("\n");
+                result.className = "command-preview " + (res.success ? "test-success" : "test-failure");
+            })
+            .catch(function (err) {
+                result.textContent = "FAIL [api]\n" + ((err && err.message) || "Request failed");
+                result.className = "command-preview test-failure";
+            })
+            .then(function () { button.disabled = false; });
+    }
+
     function gostAction(action) {
         fetchJSON("/cgi-bin/api?endpoint=" + action, { method: "POST" })
             .then(function (res) {
@@ -747,6 +777,7 @@
         $("btnRestart").addEventListener("click", function () {
             gostAction("restart");
         });
+        $("btnTestProxy").addEventListener("click", testProxy);
 
         $("proxyType").addEventListener("change", updateProxyTypeFields);
         $("authEnabled").addEventListener("change", toggleAuthFields);
