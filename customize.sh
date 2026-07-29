@@ -8,10 +8,21 @@ SKIPUNZIP=0
 MODDIR=${MODPATH}
 
 # ---- Detect old module path (for config preservation on update) ----
-OLD_MODDIR="/data/adb/modules/gost_proxy"
-if [ -d "/data/adb/ksu/modules/gost_proxy" ]; then
-    OLD_MODDIR="/data/adb/ksu/modules/gost_proxy"
-fi
+# Different root managers expose the currently installed module in different
+# locations while MODPATH points at the new staging directory.
+OLD_MODDIR=""
+for _candidate in \
+    /data/adb/modules/gost_proxy \
+    /data/adb/modules_update/gost_proxy \
+    /data/adb/ksu/modules/gost_proxy \
+    /data/adb/ksu/modules_update/gost_proxy \
+    /data/adb/ap/modules/gost_proxy \
+    /data/adb/ap/modules_update/gost_proxy; do
+    if [ -d "$_candidate" ] && [ "$_candidate" != "$MODDIR" ]; then
+        OLD_MODDIR="$_candidate"
+        break
+    fi
+done
 
 ui_print "========================================"
 ui_print " Gost Proxy Module Installer"
@@ -23,14 +34,31 @@ PRESERVE_DIR="/tmp/gost_preserve"
 rm -rf "$PRESERVE_DIR"
 mkdir -p "$PRESERVE_DIR"
 
-# Preserve a usable installed binary independently of config.json. Older or
-# manually installed modules may have gost locally without a saved config.
-if [ -s "$OLD_MODDIR/gost/gost" ] && ! grep -q "Placeholder" "$OLD_MODDIR/gost/gost" 2>/dev/null; then
-    cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost_bin"
-    ui_print "- Found existing gost binary, preserving it."
+# Preserve a usable installed binary independently of config.json. Search all
+# known module roots because update staging can hide the old module directory.
+for _binary in \
+    "$OLD_MODDIR/gost/gost" \
+    /data/adb/modules/gost_proxy/gost/gost \
+    /data/adb/modules_update/gost_proxy/gost/gost \
+    /data/adb/ksu/modules/gost_proxy/gost/gost \
+    /data/adb/ksu/modules_update/gost_proxy/gost/gost \
+    /data/adb/ap/modules/gost_proxy/gost/gost \
+    /data/adb/ap/modules_update/gost_proxy/gost/gost; do
+    [ -s "$_binary" ] || continue
+    grep -q "Placeholder" "$_binary" 2>/dev/null && continue
+    cp "$_binary" "$PRESERVE_DIR/gost_bin" && ui_print "- Found existing gost binary: $_binary"
+    break
+done
+
+# Also reuse a manually installed gost from PATH when no module copy exists.
+if [ ! -s "$PRESERVE_DIR/gost_bin" ]; then
+    _path_gost=$(command -v gost 2>/dev/null)
+    if [ -n "$_path_gost" ] && [ -s "$_path_gost" ]; then
+        cp "$_path_gost" "$PRESERVE_DIR/gost_bin" && ui_print "- Found system gost binary: $_path_gost"
+    fi
 fi
 
-if [ -f "$OLD_MODDIR/gost/config.json" ]; then
+if [ -n "$OLD_MODDIR" ] && [ -f "$OLD_MODDIR/gost/config.json" ]; then
     ui_print "- Found existing config, preserving..."
     cp "$OLD_MODDIR/gost/config.json" "$PRESERVE_DIR/config.json"
     
@@ -56,7 +84,7 @@ if [ -f "$OLD_MODDIR/gost/config.json" ]; then
 
     ui_print "- Config, nodes, and geodata preserved."
 else
-    ui_print "- No existing config found (fresh install)."
+    ui_print "- No existing config found."
 fi
 ui_print ""
 
