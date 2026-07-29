@@ -14,9 +14,11 @@ jval() {
     grep -o "\"$1\"[[:space:]]*:[[:space:]]*[^,}]*" "$CONFIG" 2>/dev/null | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
 }
 
+TEST_DIR=""
 TEST_CLIENT=""
 cleanup() {
     [ -n "$TEST_CLIENT" ] && rm -f "$TEST_CLIENT" 2>/dev/null
+    [ -n "$TEST_DIR" ] && rmdir "$TEST_DIR" 2>/dev/null
 }
 
 fail() {
@@ -48,10 +50,12 @@ done
 # /data/adb is intentionally inaccessible to Android shell UID 2000 on many
 # Magisk/KernelSU setups. Copy BusyBox to shell-accessible storage for this
 # one diagnostic request, then remove it immediately.
-TEST_CLIENT="/data/local/tmp/gost-test-busybox-$$"
+TEST_DIR="/data/local/tmp/gost-test-$$"
+TEST_CLIENT="$TEST_DIR/busybox"
+mkdir "$TEST_DIR" 2>/dev/null || fail client "failed to create test directory in /data/local/tmp"
 cp "$BB" "$TEST_CLIENT" 2>/dev/null || fail client "failed to stage busybox in /data/local/tmp"
-chown 2000:2000 "$TEST_CLIENT" 2>/dev/null || true
-chmod 755 "$TEST_CLIENT" 2>/dev/null || fail client "failed to make staged busybox executable"
+chown 2000:2000 "$TEST_DIR" "$TEST_CLIENT" 2>/dev/null || true
+chmod 755 "$TEST_DIR" "$TEST_CLIENT" 2>/dev/null || fail client "failed to make staged busybox executable"
 
 # The module/API runs as root and UID 0 is deliberately bypassed to prevent
 # gost's own upstream connections looping. Run the request as Android shell
