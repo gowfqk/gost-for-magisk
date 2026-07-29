@@ -203,11 +203,10 @@ if [ ! -f "$MODDIR/gost/config.json" ]; then
 fi
 
 # ---- Handle gost binary ----
-# Installation must remain offline and deterministic. If no reusable binary is
-# available, finish installing the module and let the user download it later
-# from WebUI.
+# Installation must remain offline and deterministic. Never remove an existing
+# file here: update managers may expose the live module as MODPATH. If no usable
+# binary is available, finish installing and let the user download it via WebUI.
 if [ ! -s "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
-    rm -f "$MODDIR/gost/gost"
     ui_print ""
     ui_print "- Gost binary is not installed; no download will run during installation."
     ui_print "- After reboot, open WebUI and tap Download Gost."
