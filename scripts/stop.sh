@@ -15,7 +15,9 @@ log_msg() {
 
 if [ -f "$PIDFILE" ]; then
     GOST_PID=$(cat "$PIDFILE")
-    if kill -0 "$GOST_PID" 2>/dev/null; then
+    case "$GOST_PID" in ''|*[!0-9]*) GOST_PID="" ;; esac
+    GOST_CMD=$(tr '\0' ' ' < "/proc/$GOST_PID/cmdline" 2>/dev/null)
+    if [ -n "$GOST_PID" ] && kill -0 "$GOST_PID" 2>/dev/null && printf '%s' "$GOST_CMD" | grep -Fq "$MODDIR/gost/gost"; then
         kill "$GOST_PID" 2>/dev/null
         sleep 1
         if kill -0 "$GOST_PID" 2>/dev/null; then

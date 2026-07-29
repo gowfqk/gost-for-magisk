@@ -263,6 +263,15 @@ download_binary() {
     TARFILE="${TMPDIR}/${ASSET_NAME}"
     BINARY_OUT="${TMPDIR}/gost"
 
+    # GitHub's release API exposes an official sha256 digest for each asset.
+    # Mirrors are transport fallbacks only; their content must match GitHub.
+    EXPECTED_SHA256=$(printf '%s' "$RAW_JSON" | tr -d '\n\r' | sed 's/},{/}\n{/g' | grep "\"name\"[[:space:]]*:[[:space:]]*\"${ASSET_NAME}\"" | grep -o '"digest"[[:space:]]*:[[:space:]]*"sha256:[0-9A-Fa-f]*"' | head -1 | sed 's/.*sha256://; s/"$//')
+    if [ -z "$EXPECTED_SHA256" ]; then
+        err "Official SHA256 digest not found for $ASSET_NAME"
+        rm -rf "$TMPDIR"
+        return 1
+    fi
+
     log "Target asset: $ASSET_NAME"
 
     # Try direct download first
@@ -304,6 +313,22 @@ download_binary() {
         rm -rf "$TMPDIR"
         return 1
     fi
+
+    if has_cmd sha256sum; then
+        ACTUAL_SHA256=$(sha256sum "$TARFILE" | awk '{print $1}')
+    elif has_cmd busybox; then
+        ACTUAL_SHA256=$(busybox sha256sum "$TARFILE" | awk '{print $1}')
+    else
+        err "sha256sum not found; refusing unverified binary"
+        rm -rf "$TMPDIR"
+        return 1
+    fi
+    if [ "$(printf '%s' "$ACTUAL_SHA256" | tr 'A-F' 'a-f')" != "$(printf '%s' "$EXPECTED_SHA256" | tr 'A-F' 'a-f')" ]; then
+        err "SHA256 mismatch for $ASSET_NAME"
+        rm -rf "$TMPDIR"
+        return 1
+    fi
+    log "SHA256 verification passed"
 
     # Extract the binary from tar.gz
     log "Extracting binary from archive..."

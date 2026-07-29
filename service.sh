@@ -14,8 +14,11 @@ if [ ! -f "$MODDIR/gost/gost" ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: gost binary not found, skipping auto-start" >> "$LOGFILE"
 else
     if [ -f "$MODDIR/scripts/start.sh" ]; then
-        sh "$MODDIR/scripts/start.sh" >> "$LOGFILE" 2>&1
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] gost proxy started" >> "$LOGFILE"
+        if sh "$MODDIR/scripts/start.sh" "$MODDIR" >> "$LOGFILE" 2>&1; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] gost proxy started" >> "$LOGFILE"
+        else
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: gost proxy failed to start" >> "$LOGFILE"
+        fi
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: start.sh not found" >> "$LOGFILE"
     fi

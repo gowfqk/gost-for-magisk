@@ -9,27 +9,21 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] uninstall.sh started" >> "$LOGFILE"
 
 [ -f "$MODDIR/scripts/iptables.sh" ] && sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1
 
-if [ -f /tmp/gost.pid ]; then
-    GOST_PID=$(cat /tmp/gost.pid)
-    if kill -0 "$GOST_PID" 2>/dev/null; then
-        kill "$GOST_PID" 2>/dev/null
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stopped gost process (PID: $GOST_PID)" >> "$LOGFILE"
+stop_owned_pid() {
+    _pidfile="$1" _expected="$2" _label="$3"
+    [ -f "$_pidfile" ] || return
+    _pid=$(cat "$_pidfile" 2>/dev/null)
+    case "$_pid" in ''|*[!0-9]*) _pid="" ;; esac
+    _cmd=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
+    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null && printf '%s' "$_cmd" | grep -Fq "$_expected"; then
+        kill "$_pid" 2>/dev/null
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stopped $_label (PID: $_pid)" >> "$LOGFILE"
     fi
-    rm -f /tmp/gost.pid
-fi
+    rm -f "$_pidfile"
+}
 
-if [ -f /tmp/gost-webui.pid ]; then
-    WEBUI_PID=$(cat /tmp/gost-webui.pid)
-    if kill -0 "$WEBUI_PID" 2>/dev/null; then
-        kill "$WEBUI_PID" 2>/dev/null
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stopped WebUI process (PID: $WEBUI_PID)" >> "$LOGFILE"
-    fi
-    rm -f /tmp/gost-webui.pid
-fi
-
-pkill -f "gost" 2>/dev/null
-pkill -f "server.sh.*gost" 2>/dev/null
-pkill -f "server.sh.*gost" 2>/dev/null
+stop_owned_pid /tmp/gost.pid "$MODDIR/gost/gost" "gost process"
+stop_owned_pid /tmp/gost-webui.pid "$MODDIR/webui/server.sh" "WebUI process"
 
 rm -f /tmp/gost.pid
 rm -f /tmp/gost-webui.pid
