@@ -28,6 +28,7 @@
             key_path: "Key Path", ca_path: "CA Path", ws_path: "WS Path", ws_host: "WS Host",
             upstream_proxy: "Upstream Proxy", address: "Address", transport: "Transport",
             direct: "Direct", import_link: "Import Link", import_link_ph: "Paste proxy link, e.g. socks://...",
+            bulk_import_links: "Bulk Import Links", bulk_import_links_ph: "One proxy link per line", bulk_import: "Bulk Import",
             save_config: "Save Config", export: "Export", import: "Import",
             save_current_as_node: "Save Current as Node", node_name: "Node Name",
             node_name_ph: "e.g. hk-node", save: "Save", saved_nodes: "Saved Nodes",
@@ -57,6 +58,7 @@
             import_success: "Imported successfully", import_fail: "Import failed",
             no_active_config: "No active config to save",
             enter_link: "Please enter a proxy link", link_parse_fail: "Parse failed, check format",
+            bulk_import_empty: "Please enter at least one proxy link", bulk_import_result: "Imported {success} of {total} links",
             imported_remarks: "Imported: {name}", invalid_json: "Invalid JSON file",
             no_logs: "No logs.", save_failed_msg: "Save failed: {msg}",
             transparent_proxy_tcp: "Transparent Proxy (TCP)",
@@ -98,6 +100,7 @@
             key_path: "密钥路径", ca_path: "CA 路径", ws_path: "WS 路径", ws_host: "WS 主机",
             upstream_proxy: "上游代理", address: "地址", transport: "传输",
             direct: "直连", import_link: "导入链接", import_link_ph: "粘贴代理链接，如 socks://...",
+            bulk_import_links: "批量导入链接", bulk_import_links_ph: "每行一个代理链接", bulk_import: "批量导入",
             save_config: "保存配置", export: "导出", import: "导入",
             save_current_as_node: "保存当前为节点", node_name: "节点名称",
             node_name_ph: "例如 hk-node", save: "保存", saved_nodes: "已保存节点",
@@ -127,6 +130,7 @@
             import_success: "导入成功", import_fail: "导入失败",
             no_active_config: "没有活动配置可保存",
             enter_link: "请输入代理链接", link_parse_fail: "链接解析失败，请检查格式",
+            bulk_import_empty: "请至少输入一个代理链接", bulk_import_result: "已导入 {success} / {total} 个链接",
             imported_remarks: "已导入: {name}", invalid_json: "无效的 JSON 文件",
             no_logs: "暂无日志。", save_failed_msg: "保存失败: {msg}",
             transparent_proxy_tcp: "透明代理（TCP）",
@@ -487,6 +491,34 @@
         return display || String(fallback || "Imported node").substring(0, 64);
     }
 
+    function configFromProxyLink(parsed, displayName) {
+        var config = collectConfig();
+        config.node_name = displayName;
+        config.upstream.enabled = true;
+        config.upstream.type = parsed.scheme === "http" ? "http" : parsed.scheme === "https" ? "http+tls" : parsed.scheme === "ss" ? "ss" : "socks5";
+        config.upstream.addr = parsed.host;
+        config.upstream.port = parsed.port;
+        config.upstream.username = parsed.username;
+        config.upstream.password = parsed.password;
+        config.upstream.route = "";
+        config.upstream.ws_path = "";
+        config.upstream.ws_host = "";
+        if (parsed.gost && (parsed.gost.route === "ws" || parsed.gost.route === "wss")) {
+            config.upstream.route = parsed.gost.route;
+            config.upstream.type += "+" + parsed.gost.route;
+            config.upstream.ws_path = parsed.gost.path || "";
+            config.upstream.ws_host = parsed.gost.host || "";
+        }
+        return config;
+    }
+
+    function importSavedNode(config, nodeId) {
+        return fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeId) + "&activate=false", {
+            method: "POST",
+            body: config
+        });
+    }
+
     function importProxyLink() {
         var link = $("importLinkInput").value.trim();
         if (!link) {
@@ -498,43 +530,9 @@
             showToast(t("link_parse_fail"), "error");
             return;
         }
-        $("proxyType").value = "redirect";
-        $("upstreamEnabled").checked = true;
-        toggleUpstreamFields();
-        $("upstreamType").value = "socks5";
-        if (parsed.scheme === "http") {
-            $("upstreamType").value = "http";
-        } else if (parsed.scheme === "https") {
-            $("upstreamType").value = "http+tls";
-        } else if (parsed.scheme === "ss") {
-            $("upstreamType").value = "ss";
-        }
-        $("upstreamAddr").value = parsed.host;
-        $("upstreamPort").value = parsed.port;
-        $("upstreamUsername").value = parsed.username;
-        $("upstreamPassword").value = parsed.password;
-        if (parsed.gost && (parsed.gost.route === "ws" || parsed.gost.route === "wss")) {
-            $("upstreamRoute").value = parsed.gost.route;
-            var currentType = $("upstreamType").value;
-            if (currentType.indexOf("+ws") === -1 && currentType.indexOf("+wss") === -1) {
-                $("upstreamType").value = currentType + "+" + parsed.gost.route;
-            }
-            $("upstreamWsPath").value = parsed.gost.path || "";
-            $("upstreamWsHost").value = parsed.gost.host || "";
-        } else {
-            $("upstreamRoute").value = "";
-            $("upstreamWsPath").value = "";
-            $("upstreamWsHost").value = "";
-        }
-        toggleUpstreamRouteFields();
-        updateProxyTypeFields();
-
-        // Keep the human-readable remarks/custom name separate from the safe
-        // internal ID used as a filename.
         var displayName = cleanDisplayName($("importNodeName").value, parsed.remarks || parsed.host);
         var nodeId = safeNodeId(displayName);
-        var config = collectConfig();
-        config.node_name = displayName;
+        var config = configFromProxyLink(parsed, displayName);
         fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeId), {
             method: "POST",
             body: config
@@ -546,9 +544,40 @@
             loadNodes();
             loadStatus();
             loadCommand();
-            showToast(t("imported_remarks", {name: res.display_name || displayName}), "success");
+            showToast(t("imported_remarks", {name: displayName}), "success");
         }).catch(function (err) {
             showToast((err && err.message) || t("import_fail"), "error");
+        });
+    }
+
+    function bulkImportProxyLinks() {
+        var links = $("bulkImportLinks").value.split(/\r?\n/).map(function (link) { return link.trim(); }).filter(Boolean);
+        if (!links.length) {
+            showToast(t("bulk_import_empty"), "error");
+            return;
+        }
+        var button = $("btnBulkImportLinks");
+        button.disabled = true;
+        var imported = 0;
+        var chain = Promise.resolve();
+        links.forEach(function (link) {
+            chain = chain.then(function () {
+                var parsed = parseProxyLink(link);
+                if (!parsed) return;
+                var displayName = cleanDisplayName("", parsed.remarks || parsed.host);
+                return importSavedNode(configFromProxyLink(parsed, displayName), safeNodeId(displayName)).then(function (res) {
+                    if (res.success) imported++;
+                });
+            });
+        });
+        chain.then(function () {
+            $("bulkImportLinks").value = "";
+            loadNodes();
+            showToast(t("bulk_import_result", {success: imported, total: links.length}), imported ? "success" : "error");
+        }).catch(function () {
+            showToast(t("import_fail"), "error");
+        }).then(function () {
+            button.disabled = false;
         });
     }
 

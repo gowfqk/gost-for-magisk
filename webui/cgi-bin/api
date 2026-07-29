@@ -33,6 +33,7 @@ for pair in $(echo "$Q" | tr '&' ' ' 2>/dev/null); do
         endpoint) ENDPOINT="$val" ;;
         lines)    LINES="$val" ;;
         name)     QUERY_NAME="$val" ;;
+        activate) QUERY_ACTIVATE="$val" ;;
     esac
 done
 
@@ -117,24 +118,28 @@ get_active_node() {
     fi
 }
 
-write_config() {
+normalize_config() {
+    printf '%s' "$1" | sed 's/"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"/"proxy_type": "redirect"/'
+}
+
+valid_config() {
     _data="$1"
-    [ -n "$_data" ] || return 1
-    [ ${#_data} -le 65536 ] || return 1
+    [ -n "$_data" ] && [ ${#_data} -le 65536 ] || return 1
     printf '%s' "$_data" | grep -q '^[[:space:]]*{' || return 1
     printf '%s' "$_data" | grep -q '}[[:space:]]*$' || return 1
-
     _listen_port=$(printf '%s' "$_data" | grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
     _webui_port=$(printf '%s' "$_data" | grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
-    _data=$(printf '%s' "$_data" | sed 's/"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"/"proxy_type": "redirect"/')
     [ -n "$_listen_port" ] && [ "$_listen_port" -ge 1 ] 2>/dev/null && [ "$_listen_port" -le 65535 ] 2>/dev/null || return 1
     [ -z "$_webui_port" ] || { [ "$_webui_port" -ge 1 ] 2>/dev/null && [ "$_webui_port" -le 65535 ] 2>/dev/null; } || return 1
+}
 
+write_config() {
+    _data=$(normalize_config "$1")
+    valid_config "$_data" || return 1
     _tmp="$CONFIG.tmp.$$"
     umask 077
     printf '%s' "$_data" > "$_tmp" || return 1
     mv -f "$_tmp" "$CONFIG" || { rm -f "$_tmp"; return 1; }
-    return 0
 }
 
 # Keep edits to config.json synchronized with the active saved node.
@@ -235,13 +240,24 @@ case "$ENDPOINT" in
         elif [ -f "$NODES_DIR/${NODE_NAME}.json" ]; then
             json_header
             printf '{"success":false,"message":"Node already exists"}'
-        elif write_config "$BODY"; then
-            cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json" && echo "$NODE_NAME" > "$ACTIVE_FILE"
-            json_header
-            printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
         else
-            json_header
-            printf '{"success":false,"message":"Invalid config"}'
+            NODE_CONFIG=$(normalize_config "$BODY")
+            if ! valid_config "$NODE_CONFIG"; then
+                json_header
+                printf '{"success":false,"message":"Invalid config"}'
+            elif [ "$QUERY_ACTIVATE" = "false" ]; then
+                umask 077
+                printf '%s' "$NODE_CONFIG" > "$NODES_DIR/${NODE_NAME}.json"
+                json_header
+                printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
+            elif write_config "$NODE_CONFIG"; then
+                cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json" && echo "$NODE_NAME" > "$ACTIVE_FILE"
+                json_header
+                printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
+            else
+                json_header
+                printf '{"success":false,"message":"Invalid config"}'
+            fi
         fi
         ;;
 

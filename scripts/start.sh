@@ -8,6 +8,33 @@ GOST_BIN="$MODDIR/gost/gost"
 
 mkdir -p "$MODDIR/logs"
 
+# Keep GOST diagnostics useful without allowing an always-on proxy to consume
+# unlimited module storage. Copy-truncate preserves the running process file
+# descriptor, unlike renaming an active log file.
+trim_log() {
+    _max_bytes=262144
+    _keep_bytes=131072
+    [ -f "$LOGFILE" ] || return 0
+    _size=$(wc -c < "$LOGFILE" 2>/dev/null)
+    case "$_size" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$_size" -lt "$_max_bytes" ] && return 0
+    _tmp="$LOGFILE.trim.$$"
+    tail -c "$_keep_bytes" "$LOGFILE" > "$_tmp" 2>/dev/null && cat "$_tmp" > "$LOGFILE"
+    rm -f "$_tmp"
+}
+
+start_log_guard() {
+    _gost_pid="$1"
+    (
+        while kill -0 "$_gost_pid" 2>/dev/null; do
+            sleep 30
+            trim_log
+        done
+    ) &
+}
+
+trim_log
+
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
 }
@@ -488,6 +515,7 @@ sleep 2
 
 if kill -0 "$GOST_PID" 2>/dev/null; then
     echo "$GOST_PID" > "$PIDFILE"
+    start_log_guard "$GOST_PID"
     if ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" start; then
         log_msg "ERROR: failed to install transparent proxy rules"
         kill "$GOST_PID" 2>/dev/null
