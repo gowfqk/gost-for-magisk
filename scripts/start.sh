@@ -299,6 +299,10 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
                 append_up_query notls true
                 ;;
         esac
+        # Some Android DNS stacks expose only ::1:53 without a local resolver.
+        # Resolve the upstream node through public IPv4 DNS instead of failing
+        # before the WebSocket/SOCKS connection can be made.
+        append_up_query resolver "223.5.5.5,1.1.1.1"
         if [ -n "$UP_WS_PATH" ]; then
             append_up_query path "$UP_WS_PATH"
             append_up_query host "$UP_WS_HOST"

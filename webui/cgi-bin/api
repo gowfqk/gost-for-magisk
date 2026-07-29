@@ -382,9 +382,17 @@ case "$ENDPOINT" in
             esac
             CMD="${CMD} -F ${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
             UP_WS=$(jsection_val upstream ws_path)
+            CMD="${CMD}?resolver=223.5.5.5%2C1.1.1.1"
             if [ -n "$UP_WS" ]; then
-                CMD="${CMD}?path=${UP_WS}"
+                CMD="${CMD}&path=${UP_WS}"
             fi
+            UP_WS_HOST=$(jsection_val upstream ws_host)
+            [ -n "$UP_WS_HOST" ] && CMD="${CMD}&host=${UP_WS_HOST}"
+            case "$UP_TYPE" in
+                socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
+                    CMD="${CMD}&notls=true"
+                    ;;
+            esac
         fi
         CMD_ESCAPED=$(printf '%s' "$CMD" | sed 's/\\/\\\\/g; s/"/\\"/g')
         json_header
