@@ -282,12 +282,28 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
 
         FORWARD_URL="${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
 
-        # Append WS query params if ws_path is set
+        # GOST v3's SOCKS5 connector enables its TLS-negotiation extension by
+        # default. Subscription links using socks:// with ws/wss normally point
+        # to a plain SOCKS5 service inside the WebSocket tunnel, so disable that
+        # extension. Otherwise TLS application data can be sent to the proxy as
+        # if it were a TLS handshake, producing an HTTP 400/bad TLS record.
+        UP_QUERY=""
+        append_up_query() {
+            _key="$1" _value="$2"
+            [ -z "$_value" ] && return
+            if [ -z "$UP_QUERY" ]; then UP_QUERY="?"; else UP_QUERY="${UP_QUERY}&"; fi
+            UP_QUERY="${UP_QUERY}${_key}=$(urlencode "$_value")"
+        }
+        case "$UP_TYPE" in
+            socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
+                append_up_query notls true
+                ;;
+        esac
         if [ -n "$UP_WS_PATH" ]; then
-            UP_QUERY="?path=$(urlencode "$UP_WS_PATH")"
-            [ -n "$UP_WS_HOST" ] && UP_QUERY="${UP_QUERY}&host=$(urlencode "$UP_WS_HOST")"
-            FORWARD_URL="${FORWARD_URL}${UP_QUERY}"
+            append_up_query path "$UP_WS_PATH"
+            append_up_query host "$UP_WS_HOST"
         fi
+        FORWARD_URL="${FORWARD_URL}${UP_QUERY}"
 
         log_msg "Forward configured: scheme=$UP_SCHEME addr=$UP_ADDR port=$UP_PORT"
     else

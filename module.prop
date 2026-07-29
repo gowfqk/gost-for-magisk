@@ -1,6 +1,6 @@
 id=gost_proxy
 name=Gost Proxy Module
-version=v1.7.2
-versionCode=10702
+version=v1.7.3
+versionCode=10703
 author=gost-magisk
 description=Run gost TCP transparent proxy with WebUI configuration
