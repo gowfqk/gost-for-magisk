@@ -67,19 +67,27 @@ fetch_one "$TMP_DIR/GeoSite.dat" "$GEOSITE_URL" "7ba5768a73e86f1382349badd26d6f2
 fetch_one "$TMP_DIR/GeoIP.dat" "$GEOIP_URL" "e9cb5a5bd338a9e4a2b9161517e3362da667ce9ff884c62d560d762b526f7e58"
 fetch_one "$TMP_DIR/Country.mmdb" "$MMDB_URL" "4ec13992731853fe3815a5e66cdc79be621eb51c447983de7bbd156a9d554080"
 
-# ---- Extract rules with geoview ----
-# quantumultx output is one domain/CIDR per line, suitable for GOST bypass files.
-"$TMP_DIR/geoview" -action extract -type geosite -input "$TMP_DIR/GeoSite.dat" \
-    -list china-list,private -format quantumultx -output "$TMP_DIR/domains.raw" >/dev/null 2>&1 || {
-    rm -rf "$TMP_DIR"; echo "geoview geosite extract failed" >&2; exit 1; }
+# ---- Convert rules with geoview ----
+# `extract` intentionally emits untyped domain values, which loses the difference
+# between exact and suffix matches. Convert to Quantumult X first, then translate
+# its typed rules into the GOST bypass syntax.
+"$TMP_DIR/geoview" -action convert -type geosite -input "$TMP_DIR/GeoSite.dat" \
+    -list china-list,private -format quantumultx -output "$TMP_DIR/domains.qx" >/dev/null 2>&1 || {
+    rm -rf "$TMP_DIR"; echo "geoview geosite conversion failed" >&2; exit 1; }
 
-"$TMP_DIR/geoview" -action extract -type geoip -input "$TMP_DIR/GeoIP.dat" \
-    -list cn,private -format quantumultx -output "$TMP_DIR/cidrs.raw" >/dev/null 2>&1 || {
-    rm -rf "$TMP_DIR"; echo "geoview geoip extract failed" >&2; exit 1; }
+"$TMP_DIR/geoview" -action convert -type geoip -input "$TMP_DIR/GeoIP.dat" \
+    -list cn,private -format quantumultx -output "$TMP_DIR/cidrs.qx" >/dev/null 2>&1 || {
+    rm -rf "$TMP_DIR"; echo "geoview geoip conversion failed" >&2; exit 1; }
 
-# ---- Normalize: strip whitespace, remove blanks/comments, deduplicate ----
-sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$TMP_DIR/domains.raw" | sed '/^$/d; /^#/d' | sort -u > "$TMP_DIR/direct-domains.txt"
-sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$TMP_DIR/cidrs.raw" | sed '/^$/d; /^#/d' | sort -u > "$TMP_DIR/direct-cidrs.txt"
+# GOST: bare domains are exact matches; `.example.com` includes subdomains.
+# Keyword and regexp rules cannot be translated faithfully and are omitted.
+awk -F ',' '
+    $1 == "host" && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2 }
+    $1 == "host-suffix" && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); sub(/^\./, "", $2); print "." $2 }
+' "$TMP_DIR/domains.qx" | sort -u > "$TMP_DIR/direct-domains.txt"
+awk -F ',' '
+    ($1 == "ip-cidr" || $1 == "ip6-cidr") && $2 != "" { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2 }
+' "$TMP_DIR/cidrs.qx" | sort -u > "$TMP_DIR/direct-cidrs.txt"
 cat "$TMP_DIR/direct-domains.txt" "$TMP_DIR/direct-cidrs.txt" > "$TMP_DIR/direct-rules.txt"
 
 domain_count=$(wc -l < "$TMP_DIR/direct-domains.txt")

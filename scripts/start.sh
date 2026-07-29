@@ -369,7 +369,6 @@ generate_runtime_config() {
     _add_service() {
         _port="$1"
         _svc="{\"name\":\"service-$_port\",\"addr\":\"$_esc_listen_addr:$_port\","
-        _svc="${_svc}\"bypass\":\"bypass-0\","
         _svc="${_svc}\"metadata\":{\"so_mark\":$_so_mark},"
         _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val}},"
         _svc="${_svc}\"listener\":{\"type\":\"tcp\"}}"
@@ -396,7 +395,7 @@ generate_runtime_config() {
     _dial_meta_json="null"
     [ -n "$_dial_meta" ] && _dial_meta_json="{$_dial_meta}"
 
-    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"resolver\":\"resolver-0\",\"nodes\":["
+    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"resolver\":\"resolver-0\",\"bypass\":\"bypass-0\",\"nodes\":["
     _chain_json="${_chain_json}{\"name\":\"node-0\",\"addr\":\"$_esc_addr:$_esc_port\","
     _chain_json="${_chain_json}\"connector\":{\"type\":\"$_connector\",\"auth\":$_conn_auth,\"metadata\":$_conn_meta_json},"
     _chain_json="${_chain_json}\"dialer\":{\"type\":\"$_dialer\",\"tls\":$_dial_tls,\"metadata\":$_dial_meta_json}"
