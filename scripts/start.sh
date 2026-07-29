@@ -400,7 +400,7 @@ generate_runtime_config() {
     _chain_json="${_chain_json}{\"name\":\"node-0\",\"addr\":\"$_esc_addr:$_esc_port\","
     _chain_json="${_chain_json}\"connector\":{\"type\":\"$_connector\",\"auth\":$_conn_auth,\"metadata\":$_conn_meta_json},"
     _chain_json="${_chain_json}\"dialer\":{\"type\":\"$_dialer\",\"tls\":$_dial_tls,\"metadata\":$_dial_meta_json}"
-    _chain_json="${_chain_json}]}]}]}"
+    _chain_json="${_chain_json}}]}]}"
 
     # Log level
     case "$LOG_LEVEL" in debug|trace) _log_level="debug" ;; *) _log_level="info" ;; esac
