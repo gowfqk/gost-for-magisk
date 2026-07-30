@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gost Proxy Manager</title>
-    <link rel="stylesheet" href="style.css?v=10913">
+    <link rel="stylesheet" href="style.css?v=10914">
 </head>
 <body>
     <div class="app">
@@ -278,18 +278,9 @@
                     <div class="card-header"><h3 data-i18n="import_link">Import Link</h3></div>
                     <div class="card-body">
                         <div class="form-group">
-                            <input type="text" class="form-input" id="importLinkInput" placeholder="socks://..." data-i18n-ph="import_link_ph">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" data-i18n="node_name">Node Name</label>
-                            <input type="text" class="form-input" id="importNodeName" placeholder="Auto from link remarks" data-i18n-ph="node_name_from_remarks">
-                        </div>
-                        <button class="btn btn-primary" id="btnImportLink" data-i18n="import_link">Import Link</button>
-                        <div class="form-group" style="margin-top:16px">
-                            <label class="form-label" data-i18n="bulk_import_links">Bulk Import Links</label>
                             <textarea class="form-input" id="bulkImportLinks" rows="6" placeholder="socks://...&#10;ss://..." data-i18n-ph="bulk_import_links_ph"></textarea>
                         </div>
-                        <button type="button" class="btn btn-primary" id="btnBulkImportLinks" data-i18n="bulk_import" disabled>Bulk Import</button>
+                        <button type="button" class="btn btn-primary" id="btnBulkImportLinks" data-i18n="import_link" disabled>Import Link</button>
                     </div>
                 </div>
 
@@ -437,6 +428,6 @@
         <div class="toast" id="toast"></div>
     </div>
 
-    <script src="app.js?v=10913"></script>
+    <script src="app.js?v=10914"></script>
 </body>
 </html>

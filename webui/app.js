@@ -30,8 +30,8 @@
             encrypt_method: "Encrypt Method", cert_path: "Certificate Path",
             key_path: "Key Path", ca_path: "CA Path", ws_path: "WS Path", ws_host: "WS Host",
             upstream_proxy: "Upstream Proxy", address: "Address", transport: "Transport",
-            direct: "Direct", import_link: "Import Link", import_link_ph: "Paste proxy link, e.g. socks://...",
-            bulk_import_links: "Bulk Import Links", bulk_import_links_ph: "One proxy link per line", bulk_import: "Bulk Import",
+            direct: "Direct", import_link: "Import Link",
+            bulk_import_links_ph: "Paste one or more proxy links, one per line",
             save_config: "Save Config", export: "Export", import: "Import",
             save_current_as_node: "Save Current as Node", node_name: "Node Name",
             node_name_ph: "e.g. hk-node", save: "Save", saved_nodes: "Saved Nodes",
@@ -60,14 +60,12 @@
             restart_ok: "Gost restarted", restart_fail: "Failed to restart gost",
             import_success: "Imported successfully", import_fail: "Import failed",
             no_active_config: "No active config to save",
-            enter_link: "Please enter a proxy link", link_parse_fail: "Parse failed, check format",
             bulk_import_empty: "Please enter at least one proxy link", bulk_import_result: "Imported {success} of {total} links",
-            imported_remarks: "Imported: {name}", invalid_json: "Invalid JSON file",
+            invalid_json: "Invalid JSON file",
             no_logs: "No logs.", save_failed_msg: "Save failed: {msg}",
             transparent_proxy_tcp: "Transparent Proxy (TCP)",
             transparent_proxy_hint: "Local TCP traffic is captured automatically with iptables; apps do not need SOCKS settings.",
             optional: "(optional)", shadowsocks_password: "Shadowsocks password",
-            node_name_from_remarks: "Auto from link remarks",
             webui: "WebUI", tcp_split_routing: "TCP Split Routing",
             enable_custom_split_routing: "Enable custom split routing",
             direct_rules: "Direct domains / IP / CIDR (one per line)",
@@ -105,8 +103,8 @@
             encrypt_method: "加密方式", cert_path: "证书路径",
             key_path: "密钥路径", ca_path: "CA 路径", ws_path: "WS 路径", ws_host: "WS 主机",
             upstream_proxy: "上游代理", address: "地址", transport: "传输",
-            direct: "直连", import_link: "导入链接", import_link_ph: "粘贴代理链接，如 socks://...",
-            bulk_import_links: "批量导入链接", bulk_import_links_ph: "每行一个代理链接", bulk_import: "批量导入",
+            direct: "直连", import_link: "导入链接",
+            bulk_import_links_ph: "粘贴一个或多个代理链接，每行一个",
             save_config: "保存配置", export: "导出", import: "导入",
             save_current_as_node: "保存当前为节点", node_name: "节点名称",
             node_name_ph: "例如 hk-node", save: "保存", saved_nodes: "已保存节点",
@@ -135,14 +133,12 @@
             restart_ok: "Gost 已重启", restart_fail: "重启失败",
             import_success: "导入成功", import_fail: "导入失败",
             no_active_config: "没有活动配置可保存",
-            enter_link: "请输入代理链接", link_parse_fail: "链接解析失败，请检查格式",
             bulk_import_empty: "请至少输入一个代理链接", bulk_import_result: "已导入 {success} / {total} 个链接",
-            imported_remarks: "已导入: {name}", invalid_json: "无效的 JSON 文件",
+            invalid_json: "无效的 JSON 文件",
             no_logs: "暂无日志。", save_failed_msg: "保存失败: {msg}",
             transparent_proxy_tcp: "透明代理（TCP）",
             transparent_proxy_hint: "本机 TCP 流量会由 iptables 自动接管，应用无需配置 SOCKS 代理。",
             optional: "（可选）", shadowsocks_password: "Shadowsocks 密码",
-            node_name_from_remarks: "自动读取链接备注",
             webui: "WebUI", tcp_split_routing: "TCP 分流",
             enable_custom_split_routing: "启用自定义分流",
             direct_rules: "直连域名 / IP / CIDR（每行一条）",
@@ -547,37 +543,6 @@
         return fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeId) + "&activate=false", {
             method: "POST",
             body: config
-        });
-    }
-
-    function importProxyLink() {
-        var link = $("importLinkInput").value.trim();
-        if (!link) {
-            showToast(t("enter_link"), "error");
-            return;
-        }
-        var parsed = parseProxyLink(link);
-        if (!parsed) {
-            showToast(t("link_parse_fail"), "error");
-            return;
-        }
-        var displayName = cleanDisplayName($("importNodeName").value, parsed.remarks || parsed.host);
-        var nodeId = safeNodeId(displayName);
-        var config = configFromProxyLink(parsed, displayName);
-        fetchJSON("/cgi-bin/api?endpoint=nodes/import&name=" + encodeURIComponent(nodeId), {
-            method: "POST",
-            body: config
-        }).then(function (res) {
-            if (!res.success) throw new Error(res.message || t("import_fail"));
-            $("importLinkInput").value = "";
-            $("importNodeName").value = "";
-            loadConfig();
-            loadNodes();
-            loadStatus();
-            loadCommand();
-            showToast(t("imported_remarks", {name: displayName}), "success");
-        }).catch(function (err) {
-            showToast((err && err.message) || t("import_fail"), "error");
         });
     }
 
@@ -1016,7 +981,6 @@
             }
         });
 
-        $("btnImportLink").addEventListener("click", importProxyLink);
         $("bulkImportLinks").addEventListener("input", updateBulkImportButton);
         $("bulkImportLinks").addEventListener("change", updateBulkImportButton);
         $("bulkImportLinks").addEventListener("paste", function () {
