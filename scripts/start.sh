@@ -223,7 +223,6 @@ if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
         TRANSPARENT_SNIFF_TIMEOUT=$(jsection_val transparent sniffing_timeout)
         TRANSPARENT_SNIFF_FALLBACK=$(jsection_val transparent sniffing_fallback)
         TRANSPARENT_DIAL_ORIGINAL_DST=$(jsection_val transparent sniffing_dial_original_dst)
-        TRANSPARENT_MARK=$(jsection_val transparent mark)
         if [ "$TRANSPARENT_SNIFFING" != "false" ]; then
             [ -z "$TRANSPARENT_SNIFF_TIMEOUT" ] && TRANSPARENT_SNIFF_TIMEOUT="5s"
             [ "$TRANSPARENT_SNIFF_FALLBACK" = "false" ] && TRANSPARENT_SNIFF_FALLBACK=false || TRANSPARENT_SNIFF_FALLBACK=true
@@ -233,8 +232,6 @@ if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
             append_query sniffing.fallback "$TRANSPARENT_SNIFF_FALLBACK"
             append_query sniffing.dialOriginalDst "$TRANSPARENT_DIAL_ORIGINAL_DST"
         fi
-        case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
-        append_query so_mark "$TRANSPARENT_MARK"
     fi
     LISTEN_URL="${LISTEN_URL}${QUERY}"
 fi
@@ -277,9 +274,6 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
         case "$UP_TYPE" in socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
             append_up_query notls true ;;
         esac
-        TRANSPARENT_MARK=$(jsection_val transparent mark)
-        case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
-        append_up_query so_mark "$TRANSPARENT_MARK"
         append_up_query resolver "223.5.5.5,1.1.1.1"
         if [ -n "$UP_WS_PATH" ]; then
             append_up_query path "$UP_WS_PATH"
@@ -418,17 +412,11 @@ generate_runtime_config() {
     [ "$_sniff_fallback" = "false" ] && _sniff_fallback_val=false || _sniff_fallback_val=true
     _dial_original_dst=$(jsection_val transparent sniffing_dial_original_dst)
     [ "$_dial_original_dst" = "true" ] && _dial_original_dst_val=true || _dial_original_dst_val=false
-    _so_mark=$(jsection_val transparent mark)
-    case "$_so_mark" in ''|*[!0-9]*) _so_mark=100 ;; esac
 
     _services_json=""
     _add_service() {
         _port="$1"
         _svc="{\"name\":\"service-$_port\",\"addr\":\"$_esc_listen_addr:$_port\","
-        # The service may dial the target directly when a hop-level bypass
-        # matches. Mark those direct sockets as well as the chain sockets, or
-        # OUTPUT redirects them back into this RED listener and they time out.
-        _svc="${_svc}\"sockopts\":{\"mark\":$_so_mark},"
         _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val,\"sniffing.timeout\":\"$(json_escape "$_sniff_timeout")\",\"sniffing.fallback\":$_sniff_fallback_val,\"sniffing.dialOriginalDst\":$_dial_original_dst_val}},"
         _svc="${_svc}\"listener\":{\"type\":\"red\"}}"
         if [ -n "$_services_json" ]; then _services_json="${_services_json},"; fi
@@ -454,7 +442,7 @@ generate_runtime_config() {
     _dial_meta_json="null"
     [ -n "$_dial_meta" ] && _dial_meta_json="{$_dial_meta}"
 
-    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"sockopts\":{\"mark\":$_so_mark},\"resolver\":\"resolver-0\",\"bypass\":\"bypass-0\",\"nodes\":["
+    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"resolver\":\"resolver-0\",\"bypass\":\"bypass-0\",\"nodes\":["
     _chain_json="${_chain_json}{\"name\":\"node-0\",\"addr\":\"$_esc_addr:$_esc_port\","
     _chain_json="${_chain_json}\"connector\":{\"type\":\"$_connector\",\"auth\":$_conn_auth,\"metadata\":$_conn_meta_json},"
     _chain_json="${_chain_json}\"dialer\":{\"type\":\"$_dialer\",\"tls\":$_dial_tls,\"metadata\":$_dial_meta_json}"

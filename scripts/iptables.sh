@@ -103,20 +103,15 @@ case "$WEBUI_PORT" in ''|*[!0-9]*) WEBUI_PORT=8080 ;; esac
 cleanup_rules
 "$IPT" -t nat -N "$CHAIN" || exit 1
 
-# GOST marks its outbound sockets so only its own upstream connections bypass
-# interception. This avoids the old UID 0 exemption, which unintentionally sent
-# every Android root/system TCP connection direct. Fall back to UID 0 only on
-# kernels without the mark matcher, where installing rules would otherwise loop.
-TRANSPARENT_MARK=$(jsection_val transparent mark)
-case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
-if ! "$IPT" -t nat -A "$CHAIN" -p tcp -m mark --mark "$TRANSPARENT_MARK" -j RETURN 2>/dev/null; then
-    log_msg "WARNING: mark match unavailable; falling back to UID 0 bypass"
-    "$IPT" -t nat -A "$CHAIN" -m owner --uid-owner 0 -j RETURN || {
-        log_msg "ERROR: neither mark nor owner match is available; refusing unsafe rules"
-        cleanup_rules
-        exit 1
-    }
-fi
+# Android reserves socket marks for network selection and policy routing. An
+# arbitrary GOST so_mark can make every direct or upstream dial fail with
+# ENETUNREACH. GOST runs as root, so exclude UID 0 instead to prevent its own
+# outbound connections from being redirected back into the RED listener.
+"$IPT" -t nat -A "$CHAIN" -m owner --uid-owner 0 -j RETURN || {
+    log_msg "ERROR: owner match unavailable; refusing unsafe rules"
+    cleanup_rules
+    exit 1
+}
 ROUTING_ENABLED=$(jsection_val routing enabled)
 DIRECT_UIDS=$(jsection_val routing direct_uids | tr -d ' []')
 if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
