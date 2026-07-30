@@ -220,8 +220,19 @@ if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
     if [ "$SCHEME" = "red" ]; then
         QUERY=""
         TRANSPARENT_SNIFFING=$(jsection_val transparent sniffing)
+        TRANSPARENT_SNIFF_TIMEOUT=$(jsection_val transparent sniffing_timeout)
+        TRANSPARENT_SNIFF_FALLBACK=$(jsection_val transparent sniffing_fallback)
+        TRANSPARENT_DIAL_ORIGINAL_DST=$(jsection_val transparent sniffing_dial_original_dst)
         TRANSPARENT_MARK=$(jsection_val transparent mark)
-        [ "$TRANSPARENT_SNIFFING" != "false" ] && append_query sniffing true
+        if [ "$TRANSPARENT_SNIFFING" != "false" ]; then
+            [ -z "$TRANSPARENT_SNIFF_TIMEOUT" ] && TRANSPARENT_SNIFF_TIMEOUT="5s"
+            [ "$TRANSPARENT_SNIFF_FALLBACK" = "false" ] && TRANSPARENT_SNIFF_FALLBACK=false || TRANSPARENT_SNIFF_FALLBACK=true
+            [ "$TRANSPARENT_DIAL_ORIGINAL_DST" = "true" ] && TRANSPARENT_DIAL_ORIGINAL_DST=true || TRANSPARENT_DIAL_ORIGINAL_DST=false
+            append_query sniffing true
+            append_query sniffing.timeout "$TRANSPARENT_SNIFF_TIMEOUT"
+            append_query sniffing.fallback "$TRANSPARENT_SNIFF_FALLBACK"
+            append_query sniffing.dialOriginalDst "$TRANSPARENT_DIAL_ORIGINAL_DST"
+        fi
         case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
         append_query so_mark "$TRANSPARENT_MARK"
     fi
@@ -266,6 +277,9 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
         case "$UP_TYPE" in socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
             append_up_query notls true ;;
         esac
+        TRANSPARENT_MARK=$(jsection_val transparent mark)
+        case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
+        append_up_query so_mark "$TRANSPARENT_MARK"
         append_up_query resolver "223.5.5.5,1.1.1.1"
         if [ -n "$UP_WS_PATH" ]; then
             append_up_query path "$UP_WS_PATH"
@@ -343,13 +357,13 @@ generate_runtime_config() {
         _conn_meta="${_conn_meta}\"path\":\"$_esc_ws_path\",\"host\":\"$_esc_ws_host\""
         _need_meta=1
     fi
-    # SS method goes in connector auth
+    # For an SS upstream, the imported cipher and password are stored in the
+    # same upstream username/password fields used to build the command-line URL.
     _conn_auth="null"
     if [ "$_connector" = "ss" ]; then
-        SS_METHOD=$(jsection_val shadowsocks method)
-        [ -z "$SS_METHOD" ] && SS_METHOD="aes-256-cfb"
-        SS_PASS=$(jsection_val shadowsocks password)
-        _conn_auth="{\"username\":\"$(json_escape "$SS_METHOD")\",\"password\":\"$(json_escape "$SS_PASS")\"}"
+        _ss_method="$UP_USER"
+        [ -z "$_ss_method" ] && _ss_method="aes-256-gcm"
+        _conn_auth="{\"username\":\"$(json_escape "$_ss_method")\",\"password\":\"$_esc_pass\"}"
     elif [ -n "$UP_USER" ]; then
         _conn_auth="{\"username\":\"$_esc_user\",\"password\":\"$_esc_pass\"}"
     fi
@@ -398,6 +412,12 @@ generate_runtime_config() {
     # Build services section (listener + optional multi-listen)
     _sniffing=$(jsection_val transparent sniffing)
     [ "$_sniffing" = "false" ] && _sniffing_val=false || _sniffing_val=true
+    _sniff_timeout=$(jsection_val transparent sniffing_timeout)
+    [ -z "$_sniff_timeout" ] && _sniff_timeout="5s"
+    _sniff_fallback=$(jsection_val transparent sniffing_fallback)
+    [ "$_sniff_fallback" = "false" ] && _sniff_fallback_val=false || _sniff_fallback_val=true
+    _dial_original_dst=$(jsection_val transparent sniffing_dial_original_dst)
+    [ "$_dial_original_dst" = "true" ] && _dial_original_dst_val=true || _dial_original_dst_val=false
     _so_mark=$(jsection_val transparent mark)
     case "$_so_mark" in ''|*[!0-9]*) _so_mark=100 ;; esac
 
@@ -405,9 +425,8 @@ generate_runtime_config() {
     _add_service() {
         _port="$1"
         _svc="{\"name\":\"service-$_port\",\"addr\":\"$_esc_listen_addr:$_port\","
-        _svc="${_svc}\"metadata\":{\"so_mark\":$_so_mark},"
-        _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val}},"
-        _svc="${_svc}\"listener\":{\"type\":\"tcp\"}}"
+        _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val,\"sniffing.timeout\":\"$(json_escape "$_sniff_timeout")\",\"sniffing.fallback\":$_sniff_fallback_val,\"sniffing.dialOriginalDst\":$_dial_original_dst_val}},"
+        _svc="${_svc}\"listener\":{\"type\":\"red\"}}"
         if [ -n "$_services_json" ]; then _services_json="${_services_json},"; fi
         _services_json="${_services_json}$_svc"
     }
@@ -431,7 +450,7 @@ generate_runtime_config() {
     _dial_meta_json="null"
     [ -n "$_dial_meta" ] && _dial_meta_json="{$_dial_meta}"
 
-    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"resolver\":\"resolver-0\",\"bypass\":\"bypass-0\",\"nodes\":["
+    _chain_json="{\"name\":\"chain-0\",\"hops\":[{\"name\":\"hop-0\",\"sockopts\":{\"mark\":$_so_mark},\"resolver\":\"resolver-0\",\"bypass\":\"bypass-0\",\"nodes\":["
     _chain_json="${_chain_json}{\"name\":\"node-0\",\"addr\":\"$_esc_addr:$_esc_port\","
     _chain_json="${_chain_json}\"connector\":{\"type\":\"$_connector\",\"auth\":$_conn_auth,\"metadata\":$_conn_meta_json},"
     _chain_json="${_chain_json}\"dialer\":{\"type\":\"$_dialer\",\"tls\":$_dial_tls,\"metadata\":$_dial_meta_json}"

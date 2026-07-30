@@ -16,7 +16,62 @@ jval() {
 
 jsection_val() {
     _section="$1" _key="$2"
-    sed -n "/\"$_section\"/,/}/p" "$CONFIG" 2>/dev/null | grep -o "\"$_key\"[[:space:]]*:[[:space:]]*[^}]*" | head -1 | sed 's/.*\":[[:space:]]*//' | tr -d '"'
+    awk -v section="$_section" -v key="$_key" '
+        function find_object(json, section,    pattern, rest, start, i, ch, escaped, quoted, depth) {
+            pattern = "\\\"" section "\\\"[[:space:]]*:"
+            if (!match(json, pattern)) return ""
+            start = RSTART + RLENGTH
+            rest = substr(json, start)
+            if (!match(rest, /^[[:space:]]*\{/)) return ""
+            start += RSTART + RLENGTH - 2
+            depth = 0; quoted = 0; escaped = 0
+            for (i = start; i <= length(json); i++) {
+                ch = substr(json, i, 1)
+                if (quoted) {
+                    if (escaped) escaped = 0
+                    else if (ch == "\\") escaped = 1
+                    else if (ch == "\"") quoted = 0
+                    continue
+                }
+                if (ch == "\"") quoted = 1
+                else if (ch == "{") depth++
+                else if (ch == "}" && --depth == 0) return substr(json, start, i - start + 1)
+            }
+            return ""
+        }
+        function get_scalar(object, key,    pattern, rest, i, ch, escaped, value) {
+            pattern = "\\\"" key "\\\"[[:space:]]*:"
+            if (!match(object, pattern)) return ""
+            rest = substr(object, RSTART + RLENGTH)
+            sub(/^[[:space:]]*/, "", rest)
+            if (substr(rest, 1, 1) == "[") {
+                if (match(rest, /^\[[^]]*\]/)) return substr(rest, 2, RLENGTH - 2)
+                return ""
+            }
+            if (substr(rest, 1, 1) != "\"") {
+                if (match(rest, /^[^,}]*/)) {
+                    value = substr(rest, RSTART, RLENGTH)
+                    sub(/[[:space:]]*$/, "", value)
+                    return value
+                }
+                return ""
+            }
+            value = ""; escaped = 0
+            for (i = 2; i <= length(rest); i++) {
+                ch = substr(rest, i, 1)
+                if (escaped) { value = value ch; escaped = 0 }
+                else if (ch == "\\") escaped = 1
+                else if (ch == "\"") return value
+                else value = value ch
+            }
+            return ""
+        }
+        { json = json $0 "\n" }
+        END {
+            object = find_object(json, section)
+            if (object != "") print get_scalar(object, key)
+        }
+    ' "$CONFIG" 2>/dev/null
 }
 
 IPT=$(command -v iptables 2>/dev/null)
@@ -48,14 +103,20 @@ case "$WEBUI_PORT" in ''|*[!0-9]*) WEBUI_PORT=8080 ;; esac
 cleanup_rules
 "$IPT" -t nat -N "$CHAIN" || exit 1
 
-# Keep local/control networks reachable directly. The gost process runs as
-# root, so excluding UID 0 prevents the upstream connection being redirected
-# back into gost. Android system/root services are excluded as a trade-off.
-"$IPT" -t nat -A "$CHAIN" -m owner --uid-owner 0 -j RETURN || {
-    log_msg "ERROR: owner match unavailable; refusing unsafe rules"
-    cleanup_rules
-    exit 1
-}
+# GOST marks its outbound sockets so only its own upstream connections bypass
+# interception. This avoids the old UID 0 exemption, which unintentionally sent
+# every Android root/system TCP connection direct. Fall back to UID 0 only on
+# kernels without the mark matcher, where installing rules would otherwise loop.
+TRANSPARENT_MARK=$(jsection_val transparent mark)
+case "$TRANSPARENT_MARK" in ''|*[!0-9]*) TRANSPARENT_MARK=100 ;; esac
+if ! "$IPT" -t nat -A "$CHAIN" -p tcp -m mark --mark "$TRANSPARENT_MARK" -j RETURN 2>/dev/null; then
+    log_msg "WARNING: mark match unavailable; falling back to UID 0 bypass"
+    "$IPT" -t nat -A "$CHAIN" -m owner --uid-owner 0 -j RETURN || {
+        log_msg "ERROR: neither mark nor owner match is available; refusing unsafe rules"
+        cleanup_rules
+        exit 1
+    }
+fi
 ROUTING_ENABLED=$(jsection_val routing enabled)
 DIRECT_UIDS=$(jsection_val routing direct_uids | tr -d ' []')
 if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then

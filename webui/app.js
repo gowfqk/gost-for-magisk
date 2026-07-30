@@ -369,6 +369,9 @@
             transparent: {
                 enabled: true,
                 sniffing: true,
+                sniffing_timeout: "5s",
+                sniffing_fallback: true,
+                sniffing_dial_original_dst: false,
                 mark: 100,
                 exclude_lan: true
             },
