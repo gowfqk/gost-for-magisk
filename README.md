@@ -7,7 +7,10 @@
 - 🚀 **开机自启** - 通过 Magisk service.sh 自动启动 gost 代理和 WebUI
 - 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等），纯 shell 后端无需 Python
 - 📦 **WebUI 下载二进制** - 模块安装过程不联网；安装后由用户在 WebUI 手动下载对应架构的 gost，国内网络自动尝试加速镜像
+- 🔗 **链接导入** - 一个输入框同时支持单条和批量代理链接导入（每行一条），节点名称自动读取链接备注
 - 🔀 **透明代理** - 使用 gost `red` 监听器和 iptables 自动接管本机 TCP 流量；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
+- 🇨🇳 **GeoData 自动分流** - 可下载 GeoSite/GeoIP 数据，将中国域名及 CIDR 设为直连
+- ♻️ **免重启更新 WebUI** - 更新模块后自动从新模块目录热重启 WebUI，不影响正在运行的 gost 代理
 - 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
 - 🛡️ **完整生命周期管理** - 启动 / 停止 / 重启 / 状态查询 / 日志查看
 
@@ -15,10 +18,13 @@
 
 ### 方式一：直接刷入 Magisk
 
-1. 将本项目打包为 zip 文件
-2. 在 Magisk Manager 中选择「从存储安装」
-3. 选择该 zip 文件并完成安装
-4. 重启后打开 `http://127.0.0.1:8080`，点击「下载 Gost」手动安装二进制
+1. 从 [Releases](https://github.com/gowfqk/gost-for-magisk/releases) 下载最新的 `gost-proxy-v*.zip`
+2. 在 Magisk / KernelSU / APatch 管理器中选择「从存储安装」
+3. 选择下载的 ZIP 并完成安装
+4. 首次安装建议重启手机，让模块服务和透明代理规则正常初始化
+5. 重启后打开 `http://127.0.0.1:8080`，点击「下载 Gost」手动安装二进制
+
+更新已安装模块时，安装脚本会保留配置、节点、GeoData 缓存和已有 Gost 二进制，并自动热重启 WebUI。更新后的管理界面无需重启手机即可生效，正在运行的 Gost 代理不会被中断；若热重启失败，重启手机后会按正常流程启动。
 
 ### 方式二：手动放置二进制
 
@@ -30,7 +36,9 @@
 
 ### WebUI
 
-安装后访问：`http://127.0.0.1:8080`
+安装后访问：`http://127.0.0.1:8080`（若修改过 `webui_port`，请使用配置的端口）。
+
+WebUI 支持代理配置、节点保存与切换、链接导入、Gost 下载、运行状态、日志、代理测试及 GeoData 分流管理。导入链接时可粘贴单条链接，也可粘贴多条链接并保持每行一条。
 
 ### 命令行
 
@@ -69,7 +77,7 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 
 ## 配置
 
-配置文件位于 `gost/config.json`，可通过 WebUI 或直接编辑修改。
+运行时配置位于模块目录的 `gost/config.json`，可通过 WebUI 或直接编辑修改。节点配置保存在 `gost/nodes/`，当前节点记录在 `gost/active`。这些运行时文件可能包含代理凭据，不会提交到仓库；首次安装会从 `gost/nodes/default.json.example` 创建默认配置。
 
 本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables` OUTPUT 规则。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
 
@@ -84,22 +92,25 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 ```
 gost-magisk-module/
 ├── module.prop           # Magisk 模块信息
-├── customize.sh          # 安装脚本（含自动下载）
-├── service.sh            # 开机自启服务
-├── post-fs-data.sh       # 早期初始化
-├── uninstall.sh          # 卸载清理
+├── customize.sh          # 安装、数据保留及 WebUI 热重启
+├── service.sh            # 开机自启 gost 和 WebUI
+├── post-fs-data.sh       # 早期恢复持久化 Gost 二进制
+├── uninstall.sh          # 卸载及规则清理
 ├── gost/
-│   ├── gost              # gost 二进制（自动下载，不入库）
-│   └── config.json       # 代理配置
+│   ├── geodata/          # GeoData 缓存（运行时生成）
+│   ├── nodes/            # 节点配置与默认模板
+│   └── tools/            # GeoData 辅助工具（运行时下载）
 ├── scripts/
-│   ├── download_gost.sh  # 自动下载脚本
-│   ├── start.sh          # 启动
-│   ├── stop.sh           # 停止
-│   ├── status.sh         # 状态
-│   └── config.sh         # 配置读写
+│   ├── config.sh         # 配置读写
+│   ├── download_gost.sh  # 手动下载/更新 Gost
+│   ├── iptables.sh       # 透明代理规则管理
+│   ├── start.sh          # 启动代理
+│   ├── status.sh         # 状态查询
+│   ├── stop.sh           # 停止代理
+│   ├── test_proxy.sh     # 代理连通性测试
+│   └── update_geodata.sh # 下载并更新 GeoData 分流数据
 └── webui/                # Web 管理界面
-    ├── server.sh         # 纯 shell HTTP 后端（无需 Python）
-    ├── server.sh         # 纯 Shell 后端（busybox httpd + CGI，无需 Python）
+    ├── server.sh         # 纯 Shell HTTP 服务（BusyBox httpd/nc）
     ├── cgi-bin/
     │   └── api           # CGI 脚本，处理所有 API 请求
     ├── index.html        # 前端页面
