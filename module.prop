@@ -1,6 +1,6 @@
 id=gost_proxy
 name=Gost Proxy Module
-version=v1.9.13
-versionCode=10913
+version=v1.9.14
+versionCode=10914
 author=gost-magisk
 description=Run gost TCP transparent proxy with WebUI configuration and GeoData auto-split
