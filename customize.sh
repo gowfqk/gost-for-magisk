@@ -237,8 +237,66 @@ chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"
 
+# ---- Hot-restart WebUI ----
+# Module updates may be extracted to modules_update while the old server keeps
+# serving files from the active module directory. Restart only WebUI from the
+# newly installed tree so frontend/API changes take effect without rebooting;
+# the running gost proxy is deliberately left untouched.
+WEBUI_PIDFILE="/tmp/gost-webui.pid"
+OLD_WEBUI_PID=""
+if [ -f "$WEBUI_PIDFILE" ]; then
+    OLD_WEBUI_PID=$(cat "$WEBUI_PIDFILE" 2>/dev/null)
+fi
+
+case "$OLD_WEBUI_PID" in
+    ''|*[!0-9]*) OLD_WEBUI_PID="" ;;
+esac
+
+if [ -n "$OLD_WEBUI_PID" ] && kill -0 "$OLD_WEBUI_PID" 2>/dev/null; then
+    OLD_WEBUI_CMD=$(tr '\000' ' ' < "/proc/$OLD_WEBUI_PID/cmdline" 2>/dev/null)
+    case "$OLD_WEBUI_CMD" in
+        *gost_proxy*|*gost-webui*|*webui/server.sh*)
+            ui_print "- Stopping previous WebUI (PID: $OLD_WEBUI_PID)..."
+            # Stop listener children first (notably nc/FIFO mode), otherwise a
+            # detached child could keep the port occupied after its shell exits.
+            OLD_WEBUI_CHILDREN=$(cat "/proc/$OLD_WEBUI_PID/task/$OLD_WEBUI_PID/children" 2>/dev/null)
+            for _child in $OLD_WEBUI_CHILDREN; do
+                case "$_child" in
+                    ''|*[!0-9]*) continue ;;
+                esac
+                kill "$_child" 2>/dev/null
+            done
+            kill "$OLD_WEBUI_PID" 2>/dev/null
+            _wait=0
+            while kill -0 "$OLD_WEBUI_PID" 2>/dev/null && [ "$_wait" -lt 5 ]; do
+                sleep 1
+                _wait=$((_wait + 1))
+            done
+            if kill -0 "$OLD_WEBUI_PID" 2>/dev/null; then
+                kill -9 "$OLD_WEBUI_PID" 2>/dev/null
+            fi
+            ;;
+        *)
+            ui_print "- Ignoring stale WebUI PID file (PID belongs to another process)."
+            ;;
+    esac
+fi
+rm -f "$WEBUI_PIDFILE"
+
+CONFIG_PORT=$(grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' "$MODDIR/gost/config.json" 2>/dev/null | grep -o '[0-9]*')
+WEBUI_PORT=${CONFIG_PORT:-8080}
+sh "$MODDIR/webui/server.sh" "$MODDIR" "$WEBUI_PORT" >> "$MODDIR/logs/service.log" 2>&1 &
+NEW_WEBUI_PID=$!
+sleep 1
+if kill -0 "$NEW_WEBUI_PID" 2>/dev/null; then
+    echo "$NEW_WEBUI_PID" > "$WEBUI_PIDFILE"
+    ui_print "- WebUI restarted from the new module files (PID: $NEW_WEBUI_PID)."
+else
+    ui_print "- WARNING: WebUI hot restart failed; it will start normally after reboot."
+fi
+
 ui_print ""
 ui_print "Installation complete!"
 ui_print "Gost proxy will start on boot."
-ui_print "WebUI: http://127.0.0.1:8080"
+ui_print "WebUI: http://127.0.0.1:$WEBUI_PORT"
 ui_print "========================================"
