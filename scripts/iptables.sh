@@ -5,6 +5,7 @@ ACTION=${2:-start}
 CONFIG="$MODDIR/gost/config.json"
 LOGFILE="$MODDIR/logs/gost.log"
 CHAIN="GOST_REDIRECT"
+IP6_CHAIN="GOST_IPV6_FALLBACK"
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] iptables: $1" >> "$LOGFILE"
@@ -80,6 +81,17 @@ if [ ! -x "$IPT" ]; then
     log_msg "ERROR: iptables not found"
     exit 1
 fi
+IP6T=$(command -v ip6tables 2>/dev/null)
+[ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
+
+cleanup_ipv6_rules() {
+    [ -x "$IP6T" ] || return 0
+    while "$IP6T" -t filter -C OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null; do
+        "$IP6T" -t filter -D OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null || break
+    done
+    "$IP6T" -t filter -F "$IP6_CHAIN" 2>/dev/null
+    "$IP6T" -t filter -X "$IP6_CHAIN" 2>/dev/null
+}
 
 cleanup_rules() {
     while "$IPT" -t nat -C OUTPUT -p tcp -j "$CHAIN" 2>/dev/null; do
@@ -87,6 +99,7 @@ cleanup_rules() {
     done
     "$IPT" -t nat -F "$CHAIN" 2>/dev/null
     "$IPT" -t nat -X "$CHAIN" 2>/dev/null
+    cleanup_ipv6_rules
 }
 
 if [ "$ACTION" = "stop" ]; then
@@ -140,5 +153,38 @@ fi
 "$IPT" -t nat -A "$CHAIN" -p tcp -m multiport --dports "$LISTEN_PORT,$WEBUI_PORT" -j RETURN 2>/dev/null
 "$IPT" -t nat -A "$CHAIN" -p tcp -j REDIRECT --to-ports "$LISTEN_PORT"
 "$IPT" -t nat -A OUTPUT -p tcp -j "$CHAIN"
+
+# The RED listener is IPv4-only. Reject only public IPv6 TCP so applications
+# immediately retry over IPv4, which is then handled by the normal split rules.
+# Localhost, link-local, ULA/private and multicast IPv6 remain available.
+if [ -x "$IP6T" ]; then
+    _ipv6_ok=true
+    "$IP6T" -t filter -N "$IP6_CHAIN" 2>/dev/null || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -m owner --uid-owner 0 -j RETURN || _ipv6_ok=false
+    # UIDs explicitly configured for direct routing should keep native IPv6.
+    if [ "$_ipv6_ok" = "true" ] && [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+        OLD_IFS=$IFS
+        IFS=','
+        for UID_VALUE in $DIRECT_UIDS; do
+            case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+            "$IP6T" -t filter -A "$IP6_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN || { _ipv6_ok=false; break; }
+        done
+        IFS=$OLD_IFS
+    fi
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d ::1/128 -j RETURN || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d fe80::/10 -j RETURN || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d fc00::/7 -j RETURN || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d ff00::/8 -j RETURN || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -p tcp -j REJECT --reject-with tcp-reset || _ipv6_ok=false
+    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A OUTPUT -p tcp -j "$IP6_CHAIN" || _ipv6_ok=false
+    if [ "$_ipv6_ok" = "true" ]; then
+        log_msg "public IPv6 TCP fallback enabled"
+    else
+        cleanup_ipv6_rules
+        log_msg "WARNING: failed to install IPv6 fallback rules; IPv4 proxy remains active"
+    fi
+else
+    log_msg "WARNING: ip6tables not found; public IPv6 may bypass the proxy"
+fi
 
 log_msg "transparent TCP proxy enabled on port $LISTEN_PORT"
