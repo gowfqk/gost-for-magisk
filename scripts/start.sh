@@ -425,6 +425,10 @@ generate_runtime_config() {
     _add_service() {
         _port="$1"
         _svc="{\"name\":\"service-$_port\",\"addr\":\"$_esc_listen_addr:$_port\","
+        # The service may dial the target directly when a hop-level bypass
+        # matches. Mark those direct sockets as well as the chain sockets, or
+        # OUTPUT redirects them back into this RED listener and they time out.
+        _svc="${_svc}\"sockopts\":{\"mark\":$_so_mark},"
         _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val,\"sniffing.timeout\":\"$(json_escape "$_sniff_timeout")\",\"sniffing.fallback\":$_sniff_fallback_val,\"sniffing.dialOriginalDst\":$_dial_original_dst_val}},"
         _svc="${_svc}\"listener\":{\"type\":\"red\"}}"
         if [ -n "$_services_json" ]; then _services_json="${_services_json},"; fi
