@@ -154,37 +154,14 @@ fi
 "$IPT" -t nat -A "$CHAIN" -p tcp -j REDIRECT --to-ports "$LISTEN_PORT"
 "$IPT" -t nat -A OUTPUT -p tcp -j "$CHAIN"
 
-# The RED listener is IPv4-only. Reject only public IPv6 TCP so applications
-# immediately retry over IPv4, which is then handled by the normal split rules.
-# Localhost, link-local, ULA/private and multicast IPv6 remain available.
+# Do not reject public IPv6 globally. Some Android networks are IPv6-only or
+# depend on NAT64, and many applications do not reliably retry IPv4 after a
+# firewall REJECT. cleanup_rules above still removes the v1.9.19 fallback chain
+# during upgrades. IPv6 remains native/direct while IPv4 TCP uses REDIRECT.
 if [ -x "$IP6T" ]; then
-    _ipv6_ok=true
-    "$IP6T" -t filter -N "$IP6_CHAIN" 2>/dev/null || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -m owner --uid-owner 0 -j RETURN || _ipv6_ok=false
-    # UIDs explicitly configured for direct routing should keep native IPv6.
-    if [ "$_ipv6_ok" = "true" ] && [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
-        OLD_IFS=$IFS
-        IFS=','
-        for UID_VALUE in $DIRECT_UIDS; do
-            case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
-            "$IP6T" -t filter -A "$IP6_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN || { _ipv6_ok=false; break; }
-        done
-        IFS=$OLD_IFS
-    fi
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d ::1/128 -j RETURN || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d fe80::/10 -j RETURN || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d fc00::/7 -j RETURN || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -d ff00::/8 -j RETURN || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A "$IP6_CHAIN" -p tcp -j REJECT --reject-with tcp-reset || _ipv6_ok=false
-    [ "$_ipv6_ok" = "true" ] && "$IP6T" -t filter -A OUTPUT -p tcp -j "$IP6_CHAIN" || _ipv6_ok=false
-    if [ "$_ipv6_ok" = "true" ]; then
-        log_msg "public IPv6 TCP fallback enabled"
-    else
-        cleanup_ipv6_rules
-        log_msg "WARNING: failed to install IPv6 fallback rules; IPv4 proxy remains active"
-    fi
+    log_msg "IPv6 left native; IPv4 TCP transparent proxy enabled"
 else
-    log_msg "WARNING: ip6tables not found; public IPv6 may bypass the proxy"
+    log_msg "WARNING: ip6tables not found; IPv4 proxy remains active"
 fi
 
 log_msg "transparent TCP proxy enabled on port $LISTEN_PORT"

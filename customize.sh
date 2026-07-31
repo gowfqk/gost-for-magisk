@@ -237,6 +237,21 @@ chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"
 
+# ---- Remove legacy IPv6 fallback rule ----
+# v1.9.19 installed a global public-IPv6 TCP REJECT chain. On IPv6-only/NAT64
+# networks this can cut off connectivity instead of causing an IPv4 retry.
+# Remove the live rule immediately during update; no reboot is required.
+IP6T=$(command -v ip6tables 2>/dev/null)
+[ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
+if [ -x "$IP6T" ]; then
+    while "$IP6T" -t filter -C OUTPUT -p tcp -j GOST_IPV6_FALLBACK 2>/dev/null; do
+        "$IP6T" -t filter -D OUTPUT -p tcp -j GOST_IPV6_FALLBACK 2>/dev/null || break
+    done
+    "$IP6T" -t filter -F GOST_IPV6_FALLBACK 2>/dev/null
+    "$IP6T" -t filter -X GOST_IPV6_FALLBACK 2>/dev/null
+    ui_print "- Removed legacy IPv6 fallback rule."
+fi
+
 # ---- Hot-restart WebUI ----
 # Module updates may be extracted to modules_update while the old server keeps
 # serving files from the active module directory. Restart only WebUI from the
