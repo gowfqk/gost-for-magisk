@@ -55,8 +55,17 @@ config_get_field() {
 config_set_field() {
     _field="$1"
     _value="$2"
+    case "$_field" in
+        ''|*[!A-Za-z0-9_]*)
+            echo "ERROR: invalid config field"
+            return 1
+            ;;
+    esac
     if [ -f "$CONFIG" ]; then
-        sed -i "s/\"$_field\":[[:space:]]*[^,}]*/\"$_field\": $_value/" "$CONFIG"
+        # The value is a raw JSON scalar. Escape sed replacement metacharacters
+        # so values containing '/', '&', '\\', or the delimiter stay literal.
+        _escaped_value=$(printf '%s' "$_value" | sed 's/[\\&|]/\\&/g')
+        sed -i "s|\"$_field\":[[:space:]]*[^,}]*|\"$_field\": $_escaped_value|" "$CONFIG"
     fi
 }
 

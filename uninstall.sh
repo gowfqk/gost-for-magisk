@@ -14,10 +14,12 @@ stop_owned_pid() {
     [ -f "$_pidfile" ] || return
     _pid=$(cat "$_pidfile" 2>/dev/null)
     case "$_pid" in ''|*[!0-9]*) _pid="" ;; esac
-    _cmd=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
-    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null && printf '%s' "$_cmd" | grep -Fq "$_expected"; then
-        kill "$_pid" 2>/dev/null
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stopped $_label (PID: $_pid)" >> "$LOGFILE"
+    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        _cmd=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
+        if printf '%s' "$_cmd" | grep -Fq "$_expected"; then
+            kill "$_pid" 2>/dev/null
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Stopped $_label (PID: $_pid)" >> "$LOGFILE"
+        fi
     fi
     rm -f "$_pidfile"
 }

@@ -87,19 +87,16 @@ if [ "$1" = "--handle" ]; then
 
     # Determine if this is an API request
     IS_API=0
-    EP=""
     case "$PATH_ONLY" in
         /cgi-bin/api)
             IS_API=1
-            for pair in $(echo "$QUERY" | tr '&' ' ' 2>/dev/null); do
-                key=$(echo "$pair" | cut -d'=' -f1)
-                val=$(echo "$pair" | cut -d'=' -f2)
-                [ "$key" = "endpoint" ] && EP="$val"
-            done
             ;;
         /api/*)
             IS_API=1
-            EP=$(echo "$PATH_ONLY" | sed 's|^/api/||')
+            # Route-style API paths are normalized into the CGI query format.
+            # Keep the original query encoded; the CGI parser owns decoding.
+            EP=${PATH_ONLY#/api/}
+            QUERY="endpoint=$EP${QUERY:+&$QUERY}"
             ;;
     esac
 
