@@ -98,8 +98,20 @@ cleanup_chain() {
     "$_bin" -t "$_table" -X "$_chain" 2>/dev/null
 }
 
+cleanup_dns_chain() {
+    _proto="$1"
+    [ -x "$IPT" ] || return 0
+    # DNS jumps include --dport 53. They must be deleted with the exact same
+    # match expression before the referenced chain can be removed on restart.
+    while "$IPT" -t nat -C OUTPUT -p "$_proto" --dport 53 -j "$DNS_CHAIN" 2>/dev/null; do
+        "$IPT" -t nat -D OUTPUT -p "$_proto" --dport 53 -j "$DNS_CHAIN" 2>/dev/null || break
+    done
+}
+
 cleanup_rules() {
     cleanup_chain "$IPT" nat OUTPUT tcp "$CHAIN"
+    cleanup_dns_chain udp
+    cleanup_dns_chain tcp
     cleanup_chain "$IPT" nat OUTPUT udp "$DNS_CHAIN"
     cleanup_chain "$IPT" nat OUTPUT tcp "$DNS_CHAIN"
     cleanup_chain "$IPT" filter OUTPUT udp "$QUIC_CHAIN"
