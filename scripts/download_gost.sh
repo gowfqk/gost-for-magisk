@@ -366,10 +366,28 @@ download_binary() {
         return 1
     fi
 
-    # Move to target location
+    # Install atomically. Never truncate or overwrite the currently working
+    # binary until the downloaded file has been fully copied and chmodded.
     mkdir -p "$TARGET_DIR"
-    cp -f "$EXTRACTED_BIN" "${TARGET_DIR}/gost"
-    chmod 755 "${TARGET_DIR}/gost"
+    INSTALL_TMP="${TARGET_DIR}/.gost.install.$$"
+    if ! cp "$EXTRACTED_BIN" "$INSTALL_TMP"; then
+        rm -f "$INSTALL_TMP"
+        err "Failed to stage downloaded binary"
+        rm -rf "$TMPDIR"
+        return 1
+    fi
+    chmod 755 "$INSTALL_TMP" || {
+        rm -f "$INSTALL_TMP"
+        err "Failed to set downloaded binary permissions"
+        rm -rf "$TMPDIR"
+        return 1
+    }
+    if ! mv -f "$INSTALL_TMP" "${TARGET_DIR}/gost"; then
+        rm -f "$INSTALL_TMP"
+        err "Failed to install downloaded binary"
+        rm -rf "$TMPDIR"
+        return 1
+    fi
 
     log "Binary installed to: ${TARGET_DIR}/gost"
     log "File size: $(ls -lh "${TARGET_DIR}/gost" 2>/dev/null | awk '{print $5}')"

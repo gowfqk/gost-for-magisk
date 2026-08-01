@@ -2,16 +2,41 @@
 
 MODDIR=${0%/*}
 LOGFILE="$MODDIR/logs/service.log"
+PERSIST_DIR="/data/adb/gost_proxy"
+PERSIST_BIN="$PERSIST_DIR/gost"
+MODULE_BIN="$MODDIR/gost/gost"
 
-mkdir -p "$MODDIR/logs"
+mkdir -p "$MODDIR/logs" "$PERSIST_DIR"
+
+usable_gost_binary() {
+    [ -s "$1" ] && ! grep -q "Placeholder" "$1" 2>/dev/null
+}
+
+atomic_copy() {
+    _src="$1" _dst="$2" _dir=${2%/*}
+    _tmp="$_dir/.gost.tmp.$$"
+    mkdir -p "$_dir" || return 1
+    cp "$_src" "$_tmp" || { rm -f "$_tmp"; return 1; }
+    chmod 755 "$_tmp" 2>/dev/null
+    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; return 1; }
+}
+
+# post-fs-data is not guaranteed to run on every root manager. Repeat the
+# restore/sync here before auto-start so the module and persistent copies heal
+# each other on every boot.
+if usable_gost_binary "$MODULE_BIN"; then
+    atomic_copy "$MODULE_BIN" "$PERSIST_BIN" 2>/dev/null || true
+elif usable_gost_binary "$PERSIST_BIN"; then
+    atomic_copy "$PERSIST_BIN" "$MODULE_BIN" 2>/dev/null || true
+fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] service.sh started" >> "$LOGFILE"
 
 sleep 10
 
 # ---- Start gost proxy ----
-if [ ! -f "$MODDIR/gost/gost" ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: gost binary not found, skipping auto-start" >> "$LOGFILE"
+if ! usable_gost_binary "$MODULE_BIN"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: usable gost binary not found, skipping auto-start" >> "$LOGFILE"
 else
     if [ -f "$MODDIR/scripts/start.sh" ]; then
         if sh "$MODDIR/scripts/start.sh" "$MODDIR" >> "$LOGFILE" 2>&1; then

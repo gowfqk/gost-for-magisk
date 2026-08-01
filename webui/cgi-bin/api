@@ -28,14 +28,25 @@ usable_gost_binary() {
     [ -s "$_bin" ] && ! grep -q "Placeholder" "$_bin" 2>/dev/null
 }
 
+atomic_copy() {
+    _src="$1" _dst="$2" _dir=${2%/*}
+    _tmp="$_dir/.gost.tmp.$$"
+    mkdir -p "$_dir" || return 1
+    cp "$_src" "$_tmp" || { rm -f "$_tmp"; return 1; }
+    chmod 755 "$_tmp" 2>/dev/null
+    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; return 1; }
+}
+
 # A root manager may replace the module directory while the persistent copy is
 # still intact. Restore it lazily so WebUI status and start actions agree.
 ensure_gost_binary() {
-    usable_gost_binary "$MODDIR/gost/gost" && return 0
+    if usable_gost_binary "$MODDIR/gost/gost"; then
+        # Heal missing/stale persistence for manually installed and legacy bins.
+        atomic_copy "$MODDIR/gost/gost" "$PERSIST_BIN" 2>/dev/null || true
+        return 0
+    fi
     if usable_gost_binary "$PERSIST_BIN"; then
-        mkdir -p "$MODDIR/gost" || return 1
-        cp "$PERSIST_BIN" "$MODDIR/gost/gost" || return 1
-        chmod 755 "$MODDIR/gost/gost" 2>/dev/null
+        atomic_copy "$PERSIST_BIN" "$MODDIR/gost/gost" || return 1
         return 0
     fi
     return 1
@@ -539,9 +550,7 @@ case "$ENDPOINT" in
                 _result=$?
                 if [ "$_result" -eq 0 ] && [ -s "$MODDIR/gost/gost" ]; then
                     chmod 755 "$MODDIR/gost/gost" 2>/dev/null
-                    mkdir -p "$PERSIST_DIR"
-                    cp "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
-                    chmod 755 "$PERSIST_DIR/gost" 2>/dev/null
+                    atomic_copy "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
                 fi
                 rm -rf "$DOWNLOAD_LOCK"
             ) >/dev/null 2>&1 &

@@ -39,8 +39,22 @@ ui_print ""
 # ---- Preserve existing config before extraction ----
 PRESERVE_DIR="/tmp/gost_preserve"
 PERSIST_DIR="/data/adb/gost_proxy"
+PERSIST_BIN="$PERSIST_DIR/gost"
 rm -rf "$PRESERVE_DIR"
 mkdir -p "$PRESERVE_DIR" "$PERSIST_DIR"
+
+usable_gost_binary() {
+    [ -s "$1" ] && ! grep -q "Placeholder" "$1" 2>/dev/null
+}
+
+atomic_copy() {
+    _src="$1" _dst="$2" _dir=${2%/*}
+    _tmp="$_dir/.gost.tmp.$$"
+    mkdir -p "$_dir" || return 1
+    cp "$_src" "$_tmp" || { rm -f "$_tmp"; return 1; }
+    chmod 755 "$_tmp" 2>/dev/null
+    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; return 1; }
+}
 
 # Preserve a usable installed binary independently of config.json. WebUI keeps
 # a persistent copy outside the module directory, so root-manager replacement
@@ -54,12 +68,13 @@ for _binary in \
     /data/adb/ksu/modules_update/gost_proxy/gost/gost \
     /data/adb/ap/modules/gost_proxy/gost/gost \
     /data/adb/ap/modules_update/gost_proxy/gost/gost; do
-    [ -s "$_binary" ] || continue
-    grep -q "Placeholder" "$_binary" 2>/dev/null && continue
-    if cp "$_binary" "$PRESERVE_DIR/gost_bin"; then
-        cp "$_binary" "$PERSIST_DIR/gost" 2>/dev/null
-        chmod 755 "$PERSIST_DIR/gost" 2>/dev/null
-        ui_print "- Found existing gost binary: $_binary"
+    usable_gost_binary "$_binary" || continue
+    if atomic_copy "$_binary" "$PRESERVE_DIR/gost_bin"; then
+        if atomic_copy "$_binary" "$PERSIST_BIN"; then
+            ui_print "- Backed up existing gost binary: $_binary"
+        else
+            ui_print "- WARNING: found gost binary but persistent backup failed: $_binary"
+        fi
         break
     fi
 done
@@ -162,10 +177,14 @@ mkdir -p "$MODDIR/gost/nodes" "$MODDIR/gost/geodata" "$MODDIR/gost/tools" "$MODD
 # ---- Restore preserved binary/config ----
 # The release ZIP intentionally does not bundle gost. Prefer the device-local
 # binary and only download when no usable binary is available.
-if [ -s "$PRESERVE_DIR/gost_bin" ]; then
-    cp "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"
-    chmod 755 "$MODDIR/gost/gost"
-    ui_print "- Reused existing gost binary; download will be skipped."
+if usable_gost_binary "$PRESERVE_DIR/gost_bin"; then
+    if atomic_copy "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"; then
+        # Refresh the external copy only after the module copy is safely placed.
+        atomic_copy "$PRESERVE_DIR/gost_bin" "$PERSIST_BIN" 2>/dev/null || true
+        ui_print "- Reused existing gost binary; download will be skipped."
+    else
+        abort "ERROR: Failed to restore the preserved gost binary. Persistent copy remains at $PERSIST_BIN"
+    fi
 fi
 
 if [ -f "$PRESERVE_DIR/config.json" ]; then
