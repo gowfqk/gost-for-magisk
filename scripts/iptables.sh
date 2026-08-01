@@ -94,7 +94,13 @@ remove_all_jump_refs() {
     # Delete by line number so cleanup also handles old releases whose jump
     # contained extra matches (for example --dport) or a different option order.
     while :; do
-        _line=$("$_bin" -t "$_table" -L "$_hook" --line-numbers -n 2>/dev/null | awk -v chain="$_chain" '$2 == chain { print $1; exit }')
+        _line=$("$_bin" -t "$_table" -L "$_hook" --line-numbers -n -v 2>/dev/null | awk -v chain="$_chain" '
+            $1 ~ /^[0-9]+$/ {
+                for (i = 2; i <= NF; i++) {
+                    if ($i == chain) { print $1; exit }
+                }
+            }
+        ')
         case "$_line" in ''|*[!0-9]*) break ;; esac
         "$_bin" -t "$_table" -D "$_hook" "$_line" 2>/dev/null || return 1
     done
@@ -128,7 +134,14 @@ cleanup_dns_chain() {
 has_jump_ref() {
     _bin="$1" _table="$2" _hook="$3" _chain="$4"
     [ -x "$_bin" ] || return 1
-    "$_bin" -t "$_table" -L "$_hook" -n 2>/dev/null | awk -v chain="$_chain" '$1 == chain { found=1 } END { exit(found ? 0 : 1) }'
+    "$_bin" -t "$_table" -L "$_hook" -n -v 2>/dev/null | awk -v chain="$_chain" '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == chain) found=1
+            }
+        }
+        END { exit(found ? 0 : 1) }
+    '
 }
 
 cleanup_rules() {
