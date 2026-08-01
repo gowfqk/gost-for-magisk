@@ -281,7 +281,23 @@ valid_config() {
 }
 
 write_config() {
-    _data=$(normalize_config "$1")
+    _data="$1"
+    # Older WebUI builds rebuilt config.json from visible form fields and omitted
+    # node_name. Preserve the active node display name server-side so editing any
+    # setting can never silently rename the node to its internal file ID.
+    if ! printf '%s' "$_data" | grep -q '"node_name"[[:space:]]*:'; then
+        _active=$(get_active_node)
+        _active_file="$NODES_DIR/${_active}.json"
+        _node_name=""
+        [ -f "$_active_file" ] && _node_name=$(jval_file "$_active_file" node_name)
+        [ -z "$_node_name" ] && [ -f "$CONFIG" ] && _node_name=$(jval_file "$CONFIG" node_name)
+        if [ -n "$_node_name" ]; then
+            _escaped_name=$(json_escape_value "$_node_name")
+            _sed_name=$(printf '%s' "$_escaped_name" | sed 's/[\\&|]/\\&/g')
+            _data=$(printf '%s' "$_data" | sed "0,/{/s||{\n    \"node_name\": \"$_sed_name\",|")
+        fi
+    fi
+    _data=$(normalize_config "$_data")
     valid_config "$_data" || return 1
     _tmp="$CONFIG.tmp.$$"
     umask 077
@@ -509,13 +525,14 @@ case "$ENDPOINT" in
         ;;
 
     start)
-        sh "$MODDIR/scripts/start.sh" "$MODDIR" >/dev/null 2>&1
+        ACTION_OUTPUT=$(sh "$MODDIR/scripts/start.sh" "$MODDIR" 2>&1)
         sleep 1
         json_header
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
             printf '{"success":true,"message":"gost started (PID: %s)"}' "$(cat "$PIDFILE")"
         else
-            printf '{"success":false,"message":"gost failed to start"}'
+            [ -z "$ACTION_OUTPUT" ] && ACTION_OUTPUT="gost failed to start"
+            printf '{"success":false,"message":"%s"}' "$(json_escape_value "$ACTION_OUTPUT")"
         fi
         ;;
 
@@ -533,13 +550,14 @@ case "$ENDPOINT" in
     restart)
         sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
         sleep 1
-        sh "$MODDIR/scripts/start.sh" "$MODDIR" >/dev/null 2>&1
+        ACTION_OUTPUT=$(sh "$MODDIR/scripts/start.sh" "$MODDIR" 2>&1)
         sleep 1
         json_header
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
             printf '{"success":true,"message":"gost restarted (PID: %s)"}' "$(cat "$PIDFILE")"
         else
-            printf '{"success":false,"message":"gost failed to restart"}'
+            [ -z "$ACTION_OUTPUT" ] && ACTION_OUTPUT="gost failed to restart"
+            printf '{"success":false,"message":"%s"}' "$(json_escape_value "$ACTION_OUTPUT")"
         fi
         ;;
 

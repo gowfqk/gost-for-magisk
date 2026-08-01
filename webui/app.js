@@ -7,6 +7,7 @@
     var LOG_AUTO_REFRESH_MS = 2000;
     var STATUS_REFRESH_MS = 3000;
     var currentLang = "en";
+    var loadedConfig = {};
 
     // ---- i18n Dictionary ----
     var i18n = {
@@ -301,7 +302,9 @@
     }
 
     function applyConfigToForm(config) {
-        var proxyType = config.proxy_type === "socks" || config.proxy_type === "socks5" ? "socks5" : "redirect";
+        loadedConfig = config && typeof config === "object" ? config : {};
+        var proxyType = loadedConfig.proxy_type === "socks" || loadedConfig.proxy_type === "socks5" ? "socks5" : "redirect";
+        config = loadedConfig;
         $("proxyType").value = proxyType;
         $("listenAddr").value = config.listen_addr || "0.0.0.0";
         $("listenPort").value = config.listen_port || 1080;
@@ -356,7 +359,16 @@
         return String(value || "").split(/[\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean);
     }
 
+    function cloneObject(value) {
+        try {
+            return JSON.parse(JSON.stringify(value && typeof value === "object" ? value : {}));
+        } catch (e) {
+            return {};
+        }
+    }
+
     function collectConfig() {
+        var config = cloneObject(loadedConfig);
         var multiListen = [];
         var mlStr = $("advMultiListen").value.trim();
         if (mlStr) {
@@ -366,62 +378,62 @@
         }
 
         var proxyType = $("proxyType").value === "socks5" ? "socks5" : "redirect";
-        return {
-            proxy_type: proxyType,
-            listen_addr: $("listenAddr").value,
-            listen_port: parseInt($("listenPort").value, 10) || 1080,
-            webui_port: parseInt($("advWebuiPort").value, 10) || 8080,
-            transparent: {
-                enabled: proxyType === "redirect",
-                sniffing: true,
-                sniffing_timeout: "5s",
-                sniffing_fallback: true,
-                sniffing_dial_original_dst: false,
-                exclude_lan: true
-            },
-            auth: {
-                enabled: proxyType === "socks5" && $("authEnabled").checked,
-                username: $("authUsername").value,
-                password: $("authPassword").value
-            },
-            upstream: {
-                enabled: $("upstreamEnabled").checked,
-                type: $("upstreamType").value,
-                addr: $("upstreamAddr").value,
-                port: parseInt($("upstreamPort").value, 10) || 0,
-                username: $("upstreamUsername").value,
-                password: $("upstreamPassword").value,
-                route: $("upstreamRoute").value,
-                ws_path: $("upstreamWsPath").value,
-                ws_host: $("upstreamWsHost").value
-            },
-            shadowsocks: {
-                method: $("ssMethod").value,
-                password: $("ssPassword").value
-            },
-            tls: {
-                cert: $("tlsCert").value,
-                key: $("tlsKey").value,
-                ca: $("tlsCa").value
-            },
-            websocket: {
-                path: $("wsPath").value,
-                host: $("wsHost").value
-            },
-            routing: {
-                enabled: $("routingEnabled").checked,
-                bypass: splitList($("routingBypass").value),
-                direct_uids: splitList($("routingDirectUids").value)
-            },
-            geodata: {
-                enabled: $("geodataEnabled").checked,
-                auto_update: $("geodataAutoUpdate").checked
-            },
-            advanced: {
-                log_level: $("advLogLevel").value,
-                multi_listen: multiListen
-            }
-        };
+        config.proxy_type = proxyType;
+        config.listen_addr = $("listenAddr").value;
+        config.listen_port = parseInt($("listenPort").value, 10) || 1080;
+        config.webui_port = parseInt($("advWebuiPort").value, 10) || 8080;
+
+        config.transparent = Object.assign({}, config.transparent || {}, {
+            enabled: proxyType === "redirect",
+            sniffing: true,
+            sniffing_timeout: "5s",
+            sniffing_fallback: true,
+            sniffing_dial_original_dst: false,
+            exclude_lan: true
+        });
+        config.auth = Object.assign({}, config.auth || {}, {
+            enabled: proxyType === "socks5" && $("authEnabled").checked,
+            username: $("authUsername").value,
+            password: $("authPassword").value
+        });
+        config.upstream = Object.assign({}, config.upstream || {}, {
+            enabled: $("upstreamEnabled").checked,
+            type: $("upstreamType").value,
+            addr: $("upstreamAddr").value,
+            port: parseInt($("upstreamPort").value, 10) || 0,
+            username: $("upstreamUsername").value,
+            password: $("upstreamPassword").value,
+            route: $("upstreamRoute").value,
+            ws_path: $("upstreamWsPath").value,
+            ws_host: $("upstreamWsHost").value
+        });
+        config.shadowsocks = Object.assign({}, config.shadowsocks || {}, {
+            method: $("ssMethod").value,
+            password: $("ssPassword").value
+        });
+        config.tls = Object.assign({}, config.tls || {}, {
+            cert: $("tlsCert").value,
+            key: $("tlsKey").value,
+            ca: $("tlsCa").value
+        });
+        config.websocket = Object.assign({}, config.websocket || {}, {
+            path: $("wsPath").value,
+            host: $("wsHost").value
+        });
+        config.routing = Object.assign({}, config.routing || {}, {
+            enabled: $("routingEnabled").checked,
+            bypass: splitList($("routingBypass").value),
+            direct_uids: splitList($("routingDirectUids").value)
+        });
+        config.geodata = Object.assign({}, config.geodata || {}, {
+            enabled: $("geodataEnabled").checked,
+            auto_update: $("geodataAutoUpdate").checked
+        });
+        config.advanced = Object.assign({}, config.advanced || {}, {
+            log_level: $("advLogLevel").value,
+            multi_listen: multiListen
+        });
+        return config;
     }
 
     function updateProxyTypeFields() {

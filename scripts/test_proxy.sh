@@ -53,14 +53,31 @@ if [ "$PROXY_TYPE" = "socks5" ]; then
     # Offer both no-auth and username/password methods. A valid SOCKS5 server
     # replies with version 5 and one selected method (00 or 02).
     HANDSHAKE=$(printf '\005\002\000\002' | "$BB" nc -w 5 127.0.0.1 "$LISTEN_PORT" 2>/dev/null | "$BB" od -An -tx1 -N2 | tr -d ' \n')
-    case "$HANDSHAKE" in
-        0500|0502)
-            cleanup
-            printf '{"success":true,"stage":"complete","message":"SOCKS5 listener handshake succeeded","proxy_type":"socks5","listen_port":%s}' "$LISTEN_PORT"
-            exit 0
-            ;;
-        *) fail handshake "SOCKS5 handshake failed (reply=$HANDSHAKE)" ;;
-    esac
+    case "$HANDSHAKE" in 0500|0502) ;; *) fail handshake "SOCKS5 handshake failed (reply=$HANDSHAKE)" ;; esac
+
+    # A successful greeting only proves that the local listener is alive. Verify
+    # an actual request through SOCKS5 so broken upstream chains are reported.
+    CURL_BIN=$(command -v curl 2>/dev/null)
+    if [ -z "$CURL_BIN" ]; then
+        cleanup
+        printf '{"success":true,"stage":"listener","message":"SOCKS5 listener handshake succeeded; curl is unavailable, so upstream forwarding was not tested","proxy_type":"socks5","listen_port":%s}' "$LISTEN_PORT"
+        exit 0
+    fi
+    AUTH_ENABLED=$(grep -o '"auth"[[:space:]]*:[[:space:]]*{[^}]*}' "$CONFIG" 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | sed 's/.*:[[:space:]]*//' | tr -d '"')
+    if [ "$AUTH_ENABLED" = "true" ]; then
+        cleanup
+        printf '{"success":true,"stage":"listener","message":"Authenticated SOCKS5 listener handshake succeeded; test forwarding from the configured app","proxy_type":"socks5","listen_port":%s}' "$LISTEN_PORT"
+        exit 0
+    fi
+    START=$(date +%s 2>/dev/null)
+    TEST_OUTPUT=$("$CURL_BIN" -fsS --connect-timeout 8 --max-time 15 --socks5-hostname "127.0.0.1:$LISTEN_PORT" -o /dev/null "$TEST_URL" 2>&1)
+    RC=$?
+    END=$(date +%s 2>/dev/null)
+    case "$START:$END" in *[!0-9:]*|:) ELAPSED=0 ;; *) ELAPSED=$((END - START)) ;; esac
+    [ "$RC" -eq 0 ] || fail request "SOCKS5 forwarding failed (code=$RC): $TEST_OUTPUT"
+    cleanup
+    printf '{"success":true,"stage":"complete","message":"SOCKS5 forwarding request succeeded","proxy_type":"socks5","listen_port":%s,"elapsed":%s,"test_url":"%s"}' "$LISTEN_PORT" "$ELAPSED" "$TEST_URL"
+    exit 0
 fi
 
 IPT=$(command -v iptables 2>/dev/null)
