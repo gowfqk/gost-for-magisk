@@ -41,16 +41,11 @@ stop_filter
 mkdir -p "$MODDIR/logs"
 
 ABI=$(getprop ro.product.cpu.abi 2>/dev/null)
-case "$ABI" in
-    arm64-v8a) DNS_BIN="$DNS_BIN_DIR/dns-filter-arm64" ;;
-    armeabi-v7a|armeabi) DNS_BIN="$DNS_BIN_DIR/dns-filter-arm" ;;
-    x86_64) DNS_BIN="$DNS_BIN_DIR/dns-filter-amd64" ;;
-    x86) DNS_BIN="$DNS_BIN_DIR/dns-filter-386" ;;
-    *)
-        log_msg "ERROR: unsupported ABI: $ABI"
-        exit 1
-        ;;
-esac
+if [ "$ABI" != "arm64-v8a" ]; then
+    log_msg "ERROR: unsupported ABI: $ABI (arm64-v8a required)"
+    exit 1
+fi
+DNS_BIN="$DNS_BIN_DIR/dns-filter-arm64"
 
 if [ ! -s "$DNS_BIN" ] || [ ! -s "$DNS_DOMAINS" ]; then
     log_msg "ERROR: DNS filter binary or domain list is missing"

@@ -143,18 +143,9 @@ case "$ARCH" in
     arm64-v8a)
         GOST_ARCH="arm64"
         ;;
-    armeabi-v7a|armeabi)
-        GOST_ARCH="arm"
-        ;;
-    x86_64)
-        GOST_ARCH="x86_64"
-        ;;
-    x86)
-        GOST_ARCH="x86"
-        ;;
     *)
         ui_print "Unsupported architecture: $ARCH"
-        ui_print "Supported: arm64-v8a, armeabi-v7a, x86_64, x86"
+        ui_print "Supported: arm64-v8a only"
         abort "Aborting installation."
         ;;
 esac
@@ -166,7 +157,7 @@ ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
 # touching preserved data or finishing the offline installation.
-for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64 dns/bin/dns-filter-arm dns/bin/dns-filter-amd64 dns/bin/dns-filter-386; do
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
     fi

@@ -12,7 +12,7 @@
 - 🧭 **IPv4-only DNS 兼容** - 内核缺少 IPv6 NAT 时自动过滤 Google 相关域名的 AAAA 应答，防止双栈流量绕过 IPv4 透明代理
 - 🇨🇳 **GeoData 自动分流** - 可下载 GeoSite/GeoIP 数据，将中国域名及 CIDR 设为直连
 - ♻️ **免重启更新 WebUI** - 更新模块后自动从新模块目录热重启 WebUI，不影响正在运行的 gost 代理
-- 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
+- 📱 **ARM64 精简包** - 仅支持现代 Android 设备常用的 arm64-v8a，显著减小安装包体积
 - 🛡️ **完整生命周期管理** - 启动 / 停止 / 重启 / 状态查询 / 日志查看
 
 ## 安装
@@ -69,12 +69,11 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 
 ### 架构映射
 
-| 设备 ABI | gost 资源 |
-|----------|-----------|
-| arm64-v8a | android_arm64 |
-| armeabi-v7a | linux_armv7 |
-| x86_64 | linux_amd64 |
-| x86 | linux_386 |
+| 设备 ABI | gost 资源 | DNS 过滤器 |
+|----------|-----------|------------|
+| arm64-v8a | android_arm64 | 内置支持 |
+
+当前精简版安装器仅接受 `arm64-v8a`，不再打包 32 位 ARM、x86_64 或 x86 的 DNS 过滤器。
 
 ## 配置
 
