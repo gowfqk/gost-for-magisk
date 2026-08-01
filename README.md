@@ -79,9 +79,9 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 
 运行时配置位于模块目录的 `gost/config.json`，可通过 WebUI 或直接编辑修改。节点配置保存在 `gost/nodes/`，当前节点记录在 `gost/active`。这些运行时文件可能包含代理凭据，不会提交到仓库；首次安装会从 `gost/nodes/default.json.example` 创建默认配置。
 
-本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables` OUTPUT 规则。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
+本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables`/`ip6tables` OUTPUT 规则，同时接管 IPv4 与 IPv6 TCP。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
 
-注意：当前实现仅透明代理 TCP；UDP 不会被接管。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量也会直连。
+注意：当前实现仅透明代理 TCP；普通 UDP 不会被接管。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，模块会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量仍会直连。
 
 ## 卸载
 

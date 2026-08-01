@@ -4,6 +4,8 @@ MODDIR=${1:-/data/adb/modules/gost_proxy}
 CONFIG="$MODDIR/gost/config.json"
 PIDFILE="/tmp/gost.pid"
 CHAIN="GOST_REDIRECT"
+IP6_CHAIN="GOST_REDIRECT6"
+QUIC_CHAIN="GOST_QUIC_BLOCK"
 TEST_URL="https://www.gstatic.com/generate_204"
 
 json_escape() {
@@ -34,8 +36,15 @@ GOST_PID=$(cat "$PIDFILE" 2>/dev/null)
 IPT=$(command -v iptables 2>/dev/null)
 [ -z "$IPT" ] && IPT="/system/bin/iptables"
 [ -x "$IPT" ] || fail iptables "iptables not found"
-"$IPT" -t nat -C OUTPUT -p tcp -j "$CHAIN" 2>/dev/null || fail iptables "OUTPUT redirect rule is missing"
-"$IPT" -t nat -L "$CHAIN" -n 2>/dev/null | grep -q 'REDIRECT' || fail iptables "transparent redirect target is missing"
+"$IPT" -t nat -C OUTPUT -p tcp -j "$CHAIN" 2>/dev/null || fail iptables "IPv4 OUTPUT redirect rule is missing"
+"$IPT" -t nat -L "$CHAIN" -n 2>/dev/null | grep -q 'REDIRECT' || fail iptables "IPv4 transparent redirect target is missing"
+"$IPT" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "QUIC fallback rule is missing"
+IP6T=$(command -v ip6tables 2>/dev/null)
+[ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
+[ -x "$IP6T" ] || fail iptables "ip6tables not found"
+"$IP6T" -t nat -C OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null || fail iptables "IPv6 OUTPUT redirect rule is missing"
+"$IP6T" -t nat -L "$IP6_CHAIN" -n 2>/dev/null | grep -q 'REDIRECT' || fail iptables "IPv6 transparent redirect target is missing"
+"$IP6T" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "IPv6 QUIC fallback rule is missing"
 
 LISTEN_PORT=$(jval listen_port)
 case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT=1080 ;; esac

@@ -6,6 +6,8 @@ CONFIG="$MODDIR/gost/config.json"
 LOGFILE="$MODDIR/logs/gost.log"
 CHAIN="GOST_REDIRECT"
 IP6_CHAIN="GOST_IPV6_FALLBACK"
+IP6_REDIRECT_CHAIN="GOST_REDIRECT6"
+QUIC_CHAIN="GOST_QUIC_BLOCK"
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] iptables: $1" >> "$LOGFILE"
@@ -84,22 +86,23 @@ fi
 IP6T=$(command -v ip6tables 2>/dev/null)
 [ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
 
-cleanup_ipv6_rules() {
-    [ -x "$IP6T" ] || return 0
-    while "$IP6T" -t filter -C OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null; do
-        "$IP6T" -t filter -D OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null || break
+cleanup_chain() {
+    _bin="$1" _table="$2" _hook="$3" _proto="$4" _chain="$5"
+    [ -x "$_bin" ] || return 0
+    while "$_bin" -t "$_table" -C "$_hook" -p "$_proto" -j "$_chain" 2>/dev/null; do
+        "$_bin" -t "$_table" -D "$_hook" -p "$_proto" -j "$_chain" 2>/dev/null || break
     done
-    "$IP6T" -t filter -F "$IP6_CHAIN" 2>/dev/null
-    "$IP6T" -t filter -X "$IP6_CHAIN" 2>/dev/null
+    "$_bin" -t "$_table" -F "$_chain" 2>/dev/null
+    "$_bin" -t "$_table" -X "$_chain" 2>/dev/null
 }
 
 cleanup_rules() {
-    while "$IPT" -t nat -C OUTPUT -p tcp -j "$CHAIN" 2>/dev/null; do
-        "$IPT" -t nat -D OUTPUT -p tcp -j "$CHAIN" 2>/dev/null || break
-    done
-    "$IPT" -t nat -F "$CHAIN" 2>/dev/null
-    "$IPT" -t nat -X "$CHAIN" 2>/dev/null
-    cleanup_ipv6_rules
+    cleanup_chain "$IPT" nat OUTPUT tcp "$CHAIN"
+    cleanup_chain "$IPT" filter OUTPUT udp "$QUIC_CHAIN"
+    cleanup_chain "$IP6T" nat OUTPUT tcp "$IP6_REDIRECT_CHAIN"
+    cleanup_chain "$IP6T" filter OUTPUT udp "$QUIC_CHAIN"
+    # v1.9.19 legacy chain used TCP and globally rejected public IPv6.
+    cleanup_chain "$IP6T" filter OUTPUT tcp "$IP6_CHAIN"
 }
 
 if [ "$ACTION" = "stop" ]; then
@@ -112,6 +115,11 @@ LISTEN_PORT=$(jval listen_port)
 WEBUI_PORT=$(jval webui_port)
 case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT=1080 ;; esac
 case "$WEBUI_PORT" in ''|*[!0-9]*) WEBUI_PORT=8080 ;; esac
+if [ "$LISTEN_PORT" -lt 65535 ] 2>/dev/null; then
+    IPV6_LISTEN_PORT=$((LISTEN_PORT + 1))
+else
+    IPV6_LISTEN_PORT=$((LISTEN_PORT - 1))
+fi
 
 cleanup_rules
 "$IPT" -t nat -N "$CHAIN" || exit 1
@@ -154,14 +162,72 @@ fi
 "$IPT" -t nat -A "$CHAIN" -p tcp -j REDIRECT --to-ports "$LISTEN_PORT"
 "$IPT" -t nat -A OUTPUT -p tcp -j "$CHAIN"
 
-# Do not reject public IPv6 globally. Some Android networks are IPv6-only or
-# depend on NAT64, and many applications do not reliably retry IPv4 after a
-# firewall REJECT. cleanup_rules above still removes the v1.9.19 fallback chain
-# during upgrades. IPv6 remains native/direct while IPv4 TCP uses REDIRECT.
+# Intercept IPv6 TCP natively instead of rejecting it to force IPv4 fallback.
+# Google and other dual-stack services often prefer IPv6 and may not retry IPv4,
+# so leaving IPv6 direct would bypass the upstream proxy.
 if [ -x "$IP6T" ]; then
-    log_msg "IPv6 left native; IPv4 TCP transparent proxy enabled"
+    "$IP6T" -t nat -N "$IP6_REDIRECT_CHAIN" 2>/dev/null || {
+        log_msg "ERROR: IPv6 nat REDIRECT is unavailable"
+        cleanup_rules
+        exit 1
+    }
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner 0 -j RETURN || {
+        log_msg "ERROR: IPv6 owner match unavailable"
+        cleanup_rules
+        exit 1
+    }
+    if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+        OLD_IFS=$IFS
+        IFS=','
+        for UID_VALUE in $DIRECT_UIDS; do
+            case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN || {
+                IFS=$OLD_IFS
+                log_msg "ERROR: failed to add IPv6 direct UID $UID_VALUE"
+                cleanup_rules
+                exit 1
+            }
+        done
+        IFS=$OLD_IFS
+    fi
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ::1/128 -j RETURN
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fe80::/10 -j RETURN
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fc00::/7 -j RETURN
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ff00::/8 -j RETURN
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -m multiport --dports "$IPV6_LISTEN_PORT,$WEBUI_PORT" -j RETURN 2>/dev/null
+    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -j REDIRECT --to-ports "$IPV6_LISTEN_PORT" || {
+        log_msg "ERROR: failed to add IPv6 REDIRECT target"
+        cleanup_rules
+        exit 1
+    }
+    "$IP6T" -t nat -A OUTPUT -p tcp -j "$IP6_REDIRECT_CHAIN" || {
+        log_msg "ERROR: failed to attach IPv6 OUTPUT redirect"
+        cleanup_rules
+        exit 1
+    }
+    log_msg "IPv4 and IPv6 TCP transparent proxy enabled"
 else
-    log_msg "WARNING: ip6tables not found; IPv4 proxy remains active"
+    log_msg "WARNING: ip6tables not found; only IPv4 TCP is proxied"
 fi
 
-log_msg "transparent TCP proxy enabled on port $LISTEN_PORT"
+# Chrome/Google may use QUIC over UDP/443, which this TCP-only RED listener
+# cannot proxy. Reject QUIC for non-root apps so they immediately retry HTTPS
+# over TCP, which is handled above. This is protocol fallback, not IPv6 fallback.
+for _fw in "$IPT" "$IP6T"; do
+    [ -x "$_fw" ] || continue
+    "$_fw" -t filter -N "$QUIC_CHAIN" 2>/dev/null || continue
+    "$_fw" -t filter -A "$QUIC_CHAIN" -m owner --uid-owner 0 -j RETURN || continue
+    if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+        OLD_IFS=$IFS
+        IFS=','
+        for UID_VALUE in $DIRECT_UIDS; do
+            case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+            "$_fw" -t filter -A "$QUIC_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN 2>/dev/null
+        done
+        IFS=$OLD_IFS
+    fi
+    "$_fw" -t filter -A "$QUIC_CHAIN" -p udp --dport 443 -j REJECT
+    "$_fw" -t filter -A OUTPUT -p udp -j "$QUIC_CHAIN"
+done
+
+log_msg "transparent TCP proxy enabled on ports $LISTEN_PORT (IPv4) and $IPV6_LISTEN_PORT (IPv6)"

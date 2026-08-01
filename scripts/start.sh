@@ -141,8 +141,16 @@ LISTEN_ADDR=$(jval listen_addr)
 [ -z "$LISTEN_ADDR" ] && LISTEN_ADDR="0.0.0.0"
 LISTEN_PORT=$(jval listen_port)
 [ -z "$LISTEN_PORT" ] && LISTEN_PORT="1080"
+# Use a separate IPv6 REDIRECT listener. Binding only to 0.0.0.0 cannot accept
+# connections redirected to ::1, while sharing one port is not portable across
+# Android kernels because IPV6_V6ONLY behavior varies.
+if [ "$LISTEN_PORT" -lt 65535 ] 2>/dev/null; then
+    IPV6_LISTEN_PORT=$((LISTEN_PORT + 1))
+else
+    IPV6_LISTEN_PORT=$((LISTEN_PORT - 1))
+fi
 
-log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT"
+log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT ipv6_port=$IPV6_LISTEN_PORT"
 
 urlencode() {
     printf '%s' "$1" | od -An -tx1 | tr -d ' \n' | awk '
@@ -423,6 +431,11 @@ generate_runtime_config() {
         _services_json="${_services_json}$_svc"
     }
     _add_service "$LISTEN_PORT"
+    # ip6tables REDIRECT targets this dedicated IPv6 listener.
+    _saved_listen_addr="$_esc_listen_addr"
+    _esc_listen_addr="[::]"
+    _add_service "$IPV6_LISTEN_PORT"
+    _esc_listen_addr="$_saved_listen_addr"
     if [ -n "$MULTI_LISTEN" ]; then
         OLD_IFS=$IFS
         IFS=','
@@ -470,7 +483,7 @@ if [ "$USE_CONFIG" = "false" ]; then
         [ -n "$ROUTING_BYPASS" ] && FORWARD_URL="${FORWARD_URL}&bypass=$(urlencode "$ROUTING_BYPASS")"
     fi
 
-    set -- -L "$LISTEN_URL"
+    set -- -L "$LISTEN_URL" -L "red://[::]:${IPV6_LISTEN_PORT}${QUERY}"
     OLD_IFS=$IFS
     IFS=','
     for EXTRA_PORT in $MULTI_LISTEN; do
