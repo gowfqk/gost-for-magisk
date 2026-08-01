@@ -499,6 +499,16 @@ if [ "$USE_CONFIG" = "false" ]; then
 fi
 
 # ---- Start gost ----
+# SOCKS5 must never receive packets redirected by a previous transparent run.
+# Remove interception before opening the listener, eliminating both stale rules
+# and the startup window where ordinary TCP could reach the SOCKS5 handler.
+if [ "$PROXY_TYPE" = "socks5" ]; then
+    if ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop; then
+        log_msg "ERROR: failed to remove transparent proxy rules before SOCKS5 start"
+        echo "ERROR: failed to remove transparent proxy rules"
+        exit 1
+    fi
+fi
 log_msg "Starting gost proxy..."
 if [ "$USE_CONFIG" = "true" ]; then
     log_msg "Mode: config file (geodata bypass enabled)"
@@ -544,9 +554,6 @@ if kill -0 "$GOST_PID" 2>/dev/null; then
         fi
         MODE_NAME="REDIRECT transparent proxy"
     else
-        # Clear rules and DNS compatibility processes left by a previous
-        # REDIRECT run. SOCKS5 must not alter global Android traffic handling.
-        sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1 || true
         MODE_NAME="SOCKS5 proxy"
     fi
     log_msg "gost $MODE_NAME started successfully (PID: $GOST_PID)"

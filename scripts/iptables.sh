@@ -88,14 +88,31 @@ fi
 IP6T=$(command -v ip6tables 2>/dev/null)
 [ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
 
+remove_all_jump_refs() {
+    _bin="$1" _table="$2" _hook="$3" _chain="$4"
+    [ -x "$_bin" ] || return 0
+    # Delete by line number so cleanup also handles old releases whose jump
+    # contained extra matches (for example --dport) or a different option order.
+    while :; do
+        _line=$("$_bin" -t "$_table" -L "$_hook" --line-numbers -n 2>/dev/null | awk -v chain="$_chain" '$2 == chain { print $1; exit }')
+        case "$_line" in ''|*[!0-9]*) break ;; esac
+        "$_bin" -t "$_table" -D "$_hook" "$_line" 2>/dev/null || return 1
+    done
+    return 0
+}
+
 cleanup_chain() {
     _bin="$1" _table="$2" _hook="$3" _proto="$4" _chain="$5"
     [ -x "$_bin" ] || return 0
+    remove_all_jump_refs "$_bin" "$_table" "$_hook" "$_chain" || return 1
     while "$_bin" -t "$_table" -C "$_hook" -p "$_proto" -j "$_chain" 2>/dev/null; do
         "$_bin" -t "$_table" -D "$_hook" -p "$_proto" -j "$_chain" 2>/dev/null || break
     done
     "$_bin" -t "$_table" -F "$_chain" 2>/dev/null
     "$_bin" -t "$_table" -X "$_chain" 2>/dev/null
+    # Success means the chain no longer exists. This lets SOCKS5 fail closed
+    # rather than opening while stale transparent interception remains active.
+    ! "$_bin" -t "$_table" -L "$_chain" -n >/dev/null 2>&1
 }
 
 cleanup_dns_chain() {
@@ -106,6 +123,12 @@ cleanup_dns_chain() {
     while "$IPT" -t nat -C OUTPUT -p "$_proto" --dport 53 -j "$DNS_CHAIN" 2>/dev/null; do
         "$IPT" -t nat -D OUTPUT -p "$_proto" --dport 53 -j "$DNS_CHAIN" 2>/dev/null || break
     done
+}
+
+has_jump_ref() {
+    _bin="$1" _table="$2" _hook="$3" _chain="$4"
+    [ -x "$_bin" ] || return 1
+    "$_bin" -t "$_table" -L "$_hook" -n 2>/dev/null | awk -v chain="$_chain" '$1 == chain { found=1 } END { exit(found ? 0 : 1) }'
 }
 
 cleanup_rules() {
@@ -120,12 +143,27 @@ cleanup_rules() {
     cleanup_chain "$IP6T" filter OUTPUT udp "$QUIC_CHAIN"
     # v1.9.19 legacy chain used TCP and globally rejected public IPv6.
     cleanup_chain "$IP6T" filter OUTPUT tcp "$IP6_CHAIN"
+
+    # A detached custom chain is harmless, but any remaining OUTPUT jump would
+    # still redirect or reject app traffic. Treat that as a cleanup failure.
+    has_jump_ref "$IPT" nat OUTPUT "$CHAIN" && return 1
+    has_jump_ref "$IPT" nat OUTPUT "$DNS_CHAIN" && return 1
+    has_jump_ref "$IPT" filter OUTPUT "$QUIC_CHAIN" && return 1
+    if [ -x "$IP6T" ]; then
+        has_jump_ref "$IP6T" nat OUTPUT "$IP6_REDIRECT_CHAIN" && return 1
+        has_jump_ref "$IP6T" filter OUTPUT "$QUIC_CHAIN" && return 1
+        has_jump_ref "$IP6T" filter OUTPUT "$IP6_CHAIN" && return 1
+    fi
+    return 0
 }
 
 if [ "$ACTION" = "stop" ]; then
-    cleanup_rules
-    log_msg "transparent proxy rules removed"
-    exit 0
+    if cleanup_rules; then
+        log_msg "transparent proxy rules removed"
+        exit 0
+    fi
+    log_msg "ERROR: failed to remove all transparent proxy rules"
+    exit 1
 fi
 
 LISTEN_PORT=$(jval listen_port)
