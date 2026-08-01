@@ -41,10 +41,16 @@ IPT=$(command -v iptables 2>/dev/null)
 "$IPT" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "QUIC fallback rule is missing"
 IP6T=$(command -v ip6tables 2>/dev/null)
 [ -z "$IP6T" ] && IP6T="/system/bin/ip6tables"
-[ -x "$IP6T" ] || fail iptables "ip6tables not found"
-"$IP6T" -t nat -C OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null || fail iptables "IPv6 OUTPUT redirect rule is missing"
-"$IP6T" -t nat -L "$IP6_CHAIN" -n 2>/dev/null | grep -q 'REDIRECT' || fail iptables "IPv6 transparent redirect target is missing"
-"$IP6T" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "IPv6 QUIC fallback rule is missing"
+IPV6_PROXY_ENABLED=false
+if [ -x "$IP6T" ] && "$IP6T" -t nat -L OUTPUT -n >/dev/null 2>&1; then
+    if "$IP6T" -t nat -C OUTPUT -p tcp -j "$IP6_CHAIN" 2>/dev/null && \
+       "$IP6T" -t nat -L "$IP6_CHAIN" -n 2>/dev/null | grep -q 'REDIRECT'; then
+        IPV6_PROXY_ENABLED=true
+    fi
+fi
+if [ -x "$IP6T" ]; then
+    "$IP6T" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "IPv6 QUIC fallback rule is missing"
+fi
 
 LISTEN_PORT=$(jval listen_port)
 case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT=1080 ;; esac
@@ -81,5 +87,5 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 cleanup
-printf '{"success":true,"stage":"complete","message":"Transparent proxy request succeeded","listen_port":%s,"elapsed":%s,"test_url":"%s"}' \
-    "$LISTEN_PORT" "$ELAPSED" "$TEST_URL"
+printf '{"success":true,"stage":"complete","message":"Transparent proxy request succeeded","listen_port":%s,"ipv6_proxy":%s,"elapsed":%s,"test_url":"%s"}' \
+    "$LISTEN_PORT" "$IPV6_PROXY_ENABLED" "$ELAPSED" "$TEST_URL"

@@ -162,52 +162,46 @@ fi
 "$IPT" -t nat -A "$CHAIN" -p tcp -j REDIRECT --to-ports "$LISTEN_PORT"
 "$IPT" -t nat -A OUTPUT -p tcp -j "$CHAIN"
 
-# Intercept IPv6 TCP natively instead of rejecting it to force IPv4 fallback.
-# Google and other dual-stack services often prefer IPv6 and may not retry IPv4,
-# so leaving IPv6 direct would bypass the upstream proxy.
-if [ -x "$IP6T" ]; then
-    "$IP6T" -t nat -N "$IP6_REDIRECT_CHAIN" 2>/dev/null || {
-        log_msg "ERROR: IPv6 nat REDIRECT is unavailable"
-        cleanup_rules
-        exit 1
-    }
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner 0 -j RETURN || {
-        log_msg "ERROR: IPv6 owner match unavailable"
-        cleanup_rules
-        exit 1
-    }
-    if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
-        OLD_IFS=$IFS
-        IFS=','
-        for UID_VALUE in $DIRECT_UIDS; do
-            case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
-            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN || {
-                IFS=$OLD_IFS
-                log_msg "ERROR: failed to add IPv6 direct UID $UID_VALUE"
-                cleanup_rules
-                exit 1
-            }
-        done
-        IFS=$OLD_IFS
+# Intercept IPv6 TCP when the kernel provides ip6table_nat. A number of Android
+# kernels ship ip6tables but omit the IPv6 nat table; that is a capability
+# limitation, not a fatal error. Never tear down the working IPv4 proxy merely
+# because optional IPv6 interception cannot be installed.
+IPV6_PROXY_ENABLED=false
+if [ -x "$IP6T" ] && "$IP6T" -t nat -L OUTPUT -n >/dev/null 2>&1; then
+    if "$IP6T" -t nat -N "$IP6_REDIRECT_CHAIN" 2>/dev/null && \
+       "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner 0 -j RETURN 2>/dev/null; then
+        IPV6_PROXY_ENABLED=true
+        if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+            OLD_IFS=$IFS
+            IFS=','
+            for UID_VALUE in $DIRECT_UIDS; do
+                case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+                if ! "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN 2>/dev/null; then
+                    IPV6_PROXY_ENABLED=false
+                    break
+                fi
+            done
+            IFS=$OLD_IFS
+        fi
+        if [ "$IPV6_PROXY_ENABLED" = "true" ]; then
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ::1/128 -j RETURN
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fe80::/10 -j RETURN
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fc00::/7 -j RETURN
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ff00::/8 -j RETURN
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -m multiport --dports "$IPV6_LISTEN_PORT,$WEBUI_PORT" -j RETURN 2>/dev/null
+            "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -j REDIRECT --to-ports "$IPV6_LISTEN_PORT" 2>/dev/null || IPV6_PROXY_ENABLED=false
+            if [ "$IPV6_PROXY_ENABLED" = "true" ]; then
+                "$IP6T" -t nat -A OUTPUT -p tcp -j "$IP6_REDIRECT_CHAIN" 2>/dev/null || IPV6_PROXY_ENABLED=false
+            fi
+        fi
     fi
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ::1/128 -j RETURN
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fe80::/10 -j RETURN
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d fc00::/7 -j RETURN
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -d ff00::/8 -j RETURN
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -m multiport --dports "$IPV6_LISTEN_PORT,$WEBUI_PORT" -j RETURN 2>/dev/null
-    "$IP6T" -t nat -A "$IP6_REDIRECT_CHAIN" -p tcp -j REDIRECT --to-ports "$IPV6_LISTEN_PORT" || {
-        log_msg "ERROR: failed to add IPv6 REDIRECT target"
-        cleanup_rules
-        exit 1
-    }
-    "$IP6T" -t nat -A OUTPUT -p tcp -j "$IP6_REDIRECT_CHAIN" || {
-        log_msg "ERROR: failed to attach IPv6 OUTPUT redirect"
-        cleanup_rules
-        exit 1
-    }
+fi
+
+if [ "$IPV6_PROXY_ENABLED" = "true" ]; then
     log_msg "IPv4 and IPv6 TCP transparent proxy enabled"
 else
-    log_msg "WARNING: ip6tables not found; only IPv4 TCP is proxied"
+    cleanup_chain "$IP6T" nat OUTPUT tcp "$IP6_REDIRECT_CHAIN"
+    log_msg "WARNING: IPv6 nat REDIRECT unavailable; IPv4 TCP proxy remains enabled and IPv6 stays direct"
 fi
 
 # Chrome/Google may use QUIC over UDP/443, which this TCP-only RED listener
@@ -230,4 +224,8 @@ for _fw in "$IPT" "$IP6T"; do
     "$_fw" -t filter -A OUTPUT -p udp -j "$QUIC_CHAIN"
 done
 
-log_msg "transparent TCP proxy enabled on ports $LISTEN_PORT (IPv4) and $IPV6_LISTEN_PORT (IPv6)"
+if [ "$IPV6_PROXY_ENABLED" = "true" ]; then
+    log_msg "transparent TCP proxy enabled on ports $LISTEN_PORT (IPv4) and $IPV6_LISTEN_PORT (IPv6)"
+else
+    log_msg "transparent TCP proxy enabled on port $LISTEN_PORT (IPv4 only; IPv6 kernel NAT unsupported)"
+fi
