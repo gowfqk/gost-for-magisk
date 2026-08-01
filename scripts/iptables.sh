@@ -8,6 +8,8 @@ CHAIN="GOST_REDIRECT"
 IP6_CHAIN="GOST_IPV6_FALLBACK"
 IP6_REDIRECT_CHAIN="GOST_REDIRECT6"
 QUIC_CHAIN="GOST_QUIC_BLOCK"
+DNS_CHAIN="GOST_DNS4_ONLY"
+DNS_PORT=1053
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] iptables: $1" >> "$LOGFILE"
@@ -98,7 +100,10 @@ cleanup_chain() {
 
 cleanup_rules() {
     cleanup_chain "$IPT" nat OUTPUT tcp "$CHAIN"
+    cleanup_chain "$IPT" nat OUTPUT udp "$DNS_CHAIN"
+    cleanup_chain "$IPT" nat OUTPUT tcp "$DNS_CHAIN"
     cleanup_chain "$IPT" filter OUTPUT udp "$QUIC_CHAIN"
+    [ -f "$MODDIR/scripts/dns_filter.sh" ] && sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" stop >/dev/null 2>&1
     cleanup_chain "$IP6T" nat OUTPUT tcp "$IP6_REDIRECT_CHAIN"
     cleanup_chain "$IP6T" filter OUTPUT udp "$QUIC_CHAIN"
     # v1.9.19 legacy chain used TCP and globally rejected public IPv6.
@@ -202,6 +207,47 @@ if [ "$IPV6_PROXY_ENABLED" = "true" ]; then
 else
     cleanup_chain "$IP6T" nat OUTPUT tcp "$IP6_REDIRECT_CHAIN"
     log_msg "WARNING: IPv6 nat REDIRECT unavailable; IPv4 TCP proxy remains enabled and IPv6 stays direct"
+
+    # Without IPv6 REDIRECT, dual-stack Google services would use AAAA records
+    # and bypass the IPv4 transparent proxy. Start a local DNS filter and only
+    # intercept non-root port 53 traffic. Its root-owned upstream query bypasses
+    # this chain, so it cannot loop back into itself.
+    DNS_FILTER_ENABLED=false
+    if sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" start "$DNS_PORT"; then
+        if "$IPT" -t nat -N "$DNS_CHAIN" 2>/dev/null && \
+           "$IPT" -t nat -A "$DNS_CHAIN" -m owner --uid-owner 0 -j RETURN 2>/dev/null; then
+            if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+                OLD_IFS=$IFS
+                IFS=','
+                for UID_VALUE in $DIRECT_UIDS; do
+                    case "$UID_VALUE" in ''|*[!0-9]*) continue ;; esac
+                    "$IPT" -t nat -A "$DNS_CHAIN" -m owner --uid-owner "$UID_VALUE" -j RETURN 2>/dev/null
+                done
+                IFS=$OLD_IFS
+            fi
+            "$IPT" -t nat -A "$DNS_CHAIN" -d 127.0.0.0/8 -j RETURN 2>/dev/null
+            if "$IPT" -t nat -A "$DNS_CHAIN" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null && \
+               "$IPT" -t nat -A "$DNS_CHAIN" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null && \
+               "$IPT" -t nat -A OUTPUT -p udp --dport 53 -j "$DNS_CHAIN" 2>/dev/null && \
+               "$IPT" -t nat -A OUTPUT -p tcp --dport 53 -j "$DNS_CHAIN" 2>/dev/null; then
+                DNS_FILTER_ENABLED=true
+            fi
+        else
+            DNS_FILTER_ENABLED=false
+        fi
+    else
+        DNS_FILTER_ENABLED=false
+    fi
+    if [ "$DNS_FILTER_ENABLED" = "true" ]; then
+        log_msg "IPv4-only DNS compatibility enabled for Google domains on port $DNS_PORT"
+    else
+        cleanup_chain "$IPT" nat OUTPUT udp "$DNS_CHAIN"
+        cleanup_chain "$IPT" nat OUTPUT tcp "$DNS_CHAIN"
+        sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" stop >/dev/null 2>&1
+        log_msg "ERROR: failed to enable IPv4-only DNS compatibility"
+        cleanup_rules
+        exit 1
+    fi
 fi
 
 # Chrome/Google may use QUIC over UDP/443, which this TCP-only RED listener

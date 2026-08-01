@@ -166,7 +166,7 @@ ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
 # touching preserved data or finishing the offline installation.
-for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example; do
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64 dns/bin/dns-filter-arm dns/bin/dns-filter-amd64 dns/bin/dns-filter-386; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
     fi
@@ -244,6 +244,7 @@ fi
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null
 chmod 755 "$MODDIR/scripts/start.sh"
 chmod 755 "$MODDIR/scripts/iptables.sh"
+chmod 755 "$MODDIR/scripts/dns_filter.sh"
 chmod 755 "$MODDIR/scripts/stop.sh"
 chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/test_proxy.sh"
@@ -255,6 +256,7 @@ chmod 755 "$MODDIR/webui/cgi-bin/api" 2>/dev/null
 chmod 755 "$MODDIR/post-fs-data.sh"
 chmod 755 "$MODDIR/service.sh"
 chmod 755 "$MODDIR/uninstall.sh"
+chmod 755 "$MODDIR/dns/bin/"* 2>/dev/null
 
 # ---- Remove legacy IPv6 fallback rule ----
 # v1.9.19 installed a global public-IPv6 TCP REJECT chain. On IPv6-only/NAT64

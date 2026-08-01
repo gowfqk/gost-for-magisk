@@ -9,6 +9,7 @@
 - 📦 **WebUI 下载二进制** - 模块安装过程不联网；安装后由用户在 WebUI 手动下载对应架构的 gost，国内网络自动尝试加速镜像
 - 🔗 **链接导入** - 一个输入框同时支持单条和批量代理链接导入（每行一条），节点名称自动读取链接备注
 - 🔀 **透明代理** - 使用 gost `red` 监听器和 iptables 自动接管本机 TCP 流量；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
+- 🧭 **IPv4-only DNS 兼容** - 内核缺少 IPv6 NAT 时自动过滤 Google 相关域名的 AAAA 应答，防止双栈流量绕过 IPv4 透明代理
 - 🇨🇳 **GeoData 自动分流** - 可下载 GeoSite/GeoIP 数据，将中国域名及 CIDR 设为直连
 - ♻️ **免重启更新 WebUI** - 更新模块后自动从新模块目录热重启 WebUI，不影响正在运行的 gost 代理
 - 📱 **多架构支持** - arm64-v8a / armeabi-v7a / x86_64 / x86
@@ -81,7 +82,9 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 
 本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables`/`ip6tables` OUTPUT 规则，同时接管 IPv4 与 IPv6 TCP。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
 
-注意：当前实现仅透明代理 TCP；普通 UDP 不会被接管。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，模块会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量仍会直连。
+部分 Android 内核虽提供 `ip6tables`，但缺少 IPv6 `nat` 表。模块检测到这种情况后会保留 IPv4 TCP 代理，并自动启动本地 DNS 过滤器：Google、YouTube 等目标域名的 A 查询正常转发，AAAA 查询返回空答案，从而让应用改用可被代理的 IPv4。过滤列表位于 `dns/ipv4-only-domains.txt`。支持 IPv6 NAT 的设备不会启用此兼容模式。
+
+注意：当前实现仅透明代理 TCP；普通 UDP 不会被接管。兼容模式只额外接管传统 DNS 的 UDP/TCP 53。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，模块会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。Android 私人 DNS（DoT）或应用内安全 DNS（DoH）不经过 53 端口，启用时可能绕过本地 DNS 过滤；遇到此情况请关闭私人 DNS和 Chrome 安全 DNS。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量仍会直连。
 
 ## 卸载
 
@@ -108,7 +111,12 @@ gost-magisk-module/
 │   ├── status.sh         # 状态查询
 │   ├── stop.sh           # 停止代理
 │   ├── test_proxy.sh     # 代理连通性测试
-│   └── update_geodata.sh # 下载并更新 GeoData 分流数据
+│   ├── update_geodata.sh # 下载并更新 GeoData 分流数据
+│   └── dns_filter.sh     # IPv4-only DNS 过滤器进程管理
+├── dns/
+│   ├── bin/              # 各 Android ABI 的 DNS 过滤器
+│   ├── src/              # DNS 过滤器 Go 源码
+│   └── ipv4-only-domains.txt # AAAA 过滤域名列表
 └── webui/                # Web 管理界面
     ├── server.sh         # 纯 Shell HTTP 服务（BusyBox httpd/nc）
     ├── cgi-bin/

@@ -1,0 +1,13 @@
+# AAAA queries for these domains return NOERROR with no answers when IPv6
+# transparent interception is unavailable. Subdomains are matched automatically.
+google.com
+googleapis.com
+gstatic.com
+googleusercontent.com
+googlevideo.com
+youtube.com
+youtu.be
+youtube-nocookie.com
+ytimg.com
+ggpht.com
+android.com
