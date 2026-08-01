@@ -35,7 +35,12 @@ ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
 LISTEN_PORT=""
 PROXY_TYPE="redirect"
 if [ -f "$CONFIG" ]; then
-    LISTEN_PORT=$(grep -o '"listen_port":[[:space:]]*[0-9]*' "$CONFIG" | grep -o '[0-9]*')
+    LISTEN_PORT=$(grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG" | head -1 | grep -o '[0-9]*$')
+    _proxy_type=$(grep -o '"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG" | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
+    case "$_proxy_type" in
+        socks|socks5) PROXY_TYPE="socks5" ;;
+        ""|redirect|red|redir) PROXY_TYPE="redirect" ;;
+    esac
 fi
 
 echo "{"
@@ -49,5 +54,5 @@ echo "    \"pid\": \"$webui_pid\""
 echo "  },"
 echo "  \"arch\": \"$ARCH\","
 echo "  \"listen_port\": \"$LISTEN_PORT\","
-echo "    \"proxy_type\": \"$PROXY_TYPE\""
+echo "  \"proxy_type\": \"$PROXY_TYPE\""
 echo "}"

@@ -1,6 +1,6 @@
 # Gost Proxy Magisk Module
 
-在 Android 设备上通过 Magisk 运行 [gost](https://github.com/go-gost/gost) TCP 透明代理，配备 WebUI 管理界面。应用无需单独配置 SOCKS/HTTP 代理。
+在 Android 设备上通过 Magisk 运行 [gost](https://github.com/go-gost/gost) 本地代理，配备 WebUI 管理界面。可选择自动接管本机 TCP 的 REDIRECT 模式，或供应用手动连接的 SOCKS5 模式。
 
 ## 功能特性
 
@@ -8,7 +8,7 @@
 - 🌐 **WebUI 管理** - 浏览器可视化配置代理参数（端口、认证、上游链、TLS 等），纯 shell 后端无需 Python
 - 📦 **WebUI 下载二进制** - 模块安装过程不联网；安装后由用户在 WebUI 手动下载对应架构的 gost，国内网络自动尝试加速镜像
 - 🔗 **链接导入** - 一个输入框同时支持单条和批量代理链接导入（每行一条），节点名称自动读取链接备注
-- 🔀 **透明代理** - 使用 gost `red` 监听器和 iptables 自动接管本机 TCP 流量；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
+- 🔀 **双本地模式** - REDIRECT 使用 gost `red` 和 iptables 自动接管本机 TCP；SOCKS5 开放普通代理端口且不修改系统流量规则；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
 - 🧭 **IPv4-only DNS 兼容** - 内核缺少 IPv6 NAT 时自动过滤 Google 相关域名的 AAAA 应答，防止双栈流量绕过 IPv4 透明代理
 - 🇨🇳 **GeoData 自动分流** - 可下载 GeoSite/GeoIP 数据，将中国域名及 CIDR 设为直连
 - ♻️ **免重启更新 WebUI** - 更新模块后自动从新模块目录热重启 WebUI，不影响正在运行的 gost 代理
@@ -79,11 +79,14 @@ WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模
 
 运行时配置位于模块目录的 `gost/config.json`，可通过 WebUI 或直接编辑修改。节点配置保存在 `gost/nodes/`，当前节点记录在 `gost/active`。这些运行时文件可能包含代理凭据，不会提交到仓库；首次安装会从 `gost/nodes/default.json.example` 创建默认配置。
 
-本地监听固定为 TCP 透明代理（`red://`），由模块自动创建 `iptables`/`ip6tables` OUTPUT 规则，同时接管 IPv4 与 IPv6 TCP。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。停止或卸载模块时会先清理规则。
+本地代理模式可在 WebUI 中选择：
 
-部分 Android 内核虽提供 `ip6tables`，但缺少 IPv6 `nat` 表。模块检测到这种情况后会保留 IPv4 TCP 代理，并自动启动本地 DNS 过滤器：Google、YouTube 等目标域名的 A 查询正常转发，AAAA 查询返回空答案，从而让应用改用可被代理的 IPv4。过滤列表位于 `dns/ipv4-only-domains.txt`。支持 IPv6 NAT 的设备不会启用此兼容模式。
+- **REDIRECT**（默认，兼容旧配置）：使用 `red://` 监听器，并自动创建 `iptables`/`ip6tables` OUTPUT 规则接管本机 IPv4 与 IPv6 TCP。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。
+- **SOCKS5**：使用 `socks5://` 普通监听器，可选用户名/密码认证。该模式不会自动接管系统流量，也不会安装透明代理、QUIC 或 DNS 重定向规则；应用需手动配置模块的监听地址和端口。由 REDIRECT 切换到 SOCKS5 并重启后，会主动清理旧透明规则。
 
-注意：当前实现仅透明代理 TCP；普通 UDP 不会被接管。兼容模式只额外接管传统 DNS 的 UDP/TCP 53。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，模块会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。Android 私人 DNS（DoT）或应用内安全 DNS（DoH）不经过 53 端口，启用时可能绕过本地 DNS 过滤；遇到此情况请关闭私人 DNS和 Chrome 安全 DNS。由于 gost 以 root 运行，为避免代理回环，Android 的 root/system UID 流量仍会直连。
+部分 Android 内核虽提供 `ip6tables`，但缺少 IPv6 `nat` 表。仅在 REDIRECT 模式下，模块检测到这种情况后会保留 IPv4 TCP 代理，并自动启动本地 DNS 过滤器：Google、YouTube 等目标域名的 A 查询正常转发，AAAA 查询返回空答案，从而让应用改用可被代理的 IPv4。过滤列表位于 `dns/ipv4-only-domains.txt`。支持 IPv6 NAT 的设备不会启用此兼容模式。
+
+注意：REDIRECT 当前只透明代理 TCP；普通 UDP 不会被接管。兼容模式只额外接管传统 DNS 的 UDP/TCP 53。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，REDIRECT 模式会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。Android 私人 DNS（DoT）或应用内安全 DNS（DoH）不经过 53 端口，启用时可能绕过本地 DNS 过滤；遇到此情况请关闭私人 DNS和 Chrome 安全 DNS。SOCKS5 模式不应用这些全局规则。由于 gost 以 root 运行，为避免 REDIRECT 代理回环，Android 的 root/system UID 流量仍会直连。
 
 ## 卸载
 

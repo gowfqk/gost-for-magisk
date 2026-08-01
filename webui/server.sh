@@ -128,7 +128,8 @@ if [ "$1" = "--handle" ]; then
                 fi
                 ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
                 LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
-                PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+                PT=$(jval proxy_type);  [ -z "$PT" ] && PT="redirect"
+                case "$PT" in socks) PT="socks5" ;; red|redir) PT="redirect" ;; redirect|socks5) ;; *) PT="redirect" ;; esac
                 LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
                 send_json "{\"gost\":{\"status\":\"$GOST_STATUS\",\"pid\":\"$GOST_PID\"},\"webui\":{\"status\":\"running\",\"port\":$PORT},\"arch\":\"$ARCH\",\"listen_port\":$LP,\"proxy_type\":\"$PT\",\"listen_addr\":\"$LA\"}"
                 ;;
@@ -179,10 +180,12 @@ if [ "$1" = "--handle" ]; then
                 send_json "{\"logs\":\"$LOGS_ESCAPED\"}"
                 ;;
             command)
-                PT=$(jval proxy_type);  [ -z "$PT" ] && PT="http"
+                PT=$(jval proxy_type);  [ -z "$PT" ] && PT="redirect"
+                case "$PT" in socks) PT="socks5" ;; red|redir) PT="redirect" ;; redirect|socks5) ;; *) PT="redirect" ;; esac
                 LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
                 LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
-                send_json "{\"command\":\"-L ${PT}://${LA}:${LP}\"}"
+                [ "$PT" = "redirect" ] && LISTEN_SCHEME="red" || LISTEN_SCHEME="socks5"
+                send_json "{\"command\":\"-L ${LISTEN_SCHEME}://${LA}:${LP}\"}"
                 ;;
             config/import)
                 if [ -n "$BODY" ]; then

@@ -63,8 +63,9 @@
             bulk_import_empty: "Please enter at least one proxy link", bulk_import_result: "Imported {success} of {total} links",
             invalid_json: "Invalid JSON file",
             no_logs: "No logs.", save_failed_msg: "Save failed: {msg}",
-            transparent_proxy_tcp: "Transparent Proxy (TCP)",
-            transparent_proxy_hint: "Local TCP traffic is captured automatically with iptables; apps do not need SOCKS settings.",
+            transparent_proxy_tcp: "REDIRECT Transparent Proxy (TCP)",
+            transparent_proxy_hint: "Local TCP traffic is captured automatically with iptables; apps do not need proxy settings.",
+            socks5_proxy_hint: "No system traffic is captured. Configure apps to use this SOCKS5 address and port manually.",
             optional: "(optional)", shadowsocks_password: "Shadowsocks password",
             webui: "WebUI", tcp_split_routing: "TCP Split Routing",
             enable_custom_split_routing: "Enable custom split routing",
@@ -136,8 +137,9 @@
             bulk_import_empty: "请至少输入一个代理链接", bulk_import_result: "已导入 {success} / {total} 个链接",
             invalid_json: "无效的 JSON 文件",
             no_logs: "暂无日志。", save_failed_msg: "保存失败: {msg}",
-            transparent_proxy_tcp: "透明代理（TCP）",
-            transparent_proxy_hint: "本机 TCP 流量会由 iptables 自动接管，应用无需配置 SOCKS 代理。",
+            transparent_proxy_tcp: "REDIRECT 透明代理（TCP）",
+            transparent_proxy_hint: "本机 TCP 流量会由 iptables 自动接管，应用无需单独配置代理。",
+            socks5_proxy_hint: "不会自动接管系统流量，应用需要手动设置此 SOCKS5 地址和端口。",
             optional: "（可选）", shadowsocks_password: "Shadowsocks 密码",
             webui: "WebUI", tcp_split_routing: "TCP 分流",
             enable_custom_split_routing: "启用自定义分流",
@@ -182,6 +184,7 @@
         currentLang = currentLang === "en" ? "zh" : "en";
         try { localStorage.setItem("gost_lang", currentLang); } catch (e) {}
         applyLanguage();
+        updateProxyTypeFields();
         // Re-render dynamic content
         loadStatus();
         loadNodes();
@@ -298,12 +301,13 @@
     }
 
     function applyConfigToForm(config) {
-        $("proxyType").value = "redirect";
+        var proxyType = config.proxy_type === "socks" || config.proxy_type === "socks5" ? "socks5" : "redirect";
+        $("proxyType").value = proxyType;
         $("listenAddr").value = config.listen_addr || "0.0.0.0";
         $("listenPort").value = config.listen_port || 1080;
 
         var auth = config.auth || {};
-        $("authEnabled").checked = false;
+        $("authEnabled").checked = proxyType === "socks5" && !!auth.enabled;
         toggleAuthFields();
         $("authUsername").value = auth.username || "";
         $("authPassword").value = auth.password || "";
@@ -361,13 +365,14 @@
             }).filter(Boolean);
         }
 
+        var proxyType = $("proxyType").value === "socks5" ? "socks5" : "redirect";
         return {
-            proxy_type: "redirect",
+            proxy_type: proxyType,
             listen_addr: $("listenAddr").value,
             listen_port: parseInt($("listenPort").value, 10) || 1080,
             webui_port: parseInt($("advWebuiPort").value, 10) || 8080,
             transparent: {
-                enabled: true,
+                enabled: proxyType === "redirect",
                 sniffing: true,
                 sniffing_timeout: "5s",
                 sniffing_fallback: true,
@@ -375,7 +380,7 @@
                 exclude_lan: true
             },
             auth: {
-                enabled: false,
+                enabled: proxyType === "socks5" && $("authEnabled").checked,
                 username: $("authUsername").value,
                 password: $("authPassword").value
             },
@@ -420,7 +425,14 @@
     }
 
     function updateProxyTypeFields() {
-        var type = $("proxyType").value;
+        var type = $("proxyType").value === "socks5" ? "socks5" : "redirect";
+        $("authCard").style.display = type === "socks5" ? "" : "none";
+        $("proxyModeHint").setAttribute("data-i18n", type === "socks5" ? "socks5_proxy_hint" : "transparent_proxy_hint");
+        $("proxyModeHint").textContent = t(type === "socks5" ? "socks5_proxy_hint" : "transparent_proxy_hint");
+        if (type !== "socks5") {
+            $("authEnabled").checked = false;
+        }
+        toggleAuthFields();
         $("ssCard").style.display = "none";
         $("tlsCard").style.display = "none";
         $("wsCard").style.display = "none";
@@ -686,7 +698,7 @@
             html += '<div class="node-item' + (isActive ? " node-active" : "") + '">';
             html += '  <div class="node-info">';
             html += '    <span class="node-name">' + escapeHtml(displayName) + (isActive ? ' <span class="node-badge">' + (currentLang === "zh" ? "使用中" : "ACTIVE") + '</span>' : "") + "</span>";
-            html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "http") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
+            html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "redirect") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
             html += "  </div>";
             html += '  <div class="node-actions">';
             html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.renameNode(\'' + escapeHtml(nodeId) + '\',\'' + escapeHtml(displayName) + '\')">' + t("rename") + '</button>';

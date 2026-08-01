@@ -136,21 +136,34 @@ jsection_val() {
     ' "$CONFIG" 2>/dev/null
 }
 
-PROXY_TYPE="redirect"
+PROXY_TYPE=$(jval proxy_type)
+case "$PROXY_TYPE" in
+    ""|redirect|red|redir) PROXY_TYPE="redirect" ;;
+    socks|socks5) PROXY_TYPE="socks5" ;;
+    *)
+        log_msg "ERROR: unsupported local proxy type: $PROXY_TYPE"
+        echo "ERROR: unsupported local proxy type"
+        exit 1
+        ;;
+esac
 LISTEN_ADDR=$(jval listen_addr)
 [ -z "$LISTEN_ADDR" ] && LISTEN_ADDR="0.0.0.0"
 LISTEN_PORT=$(jval listen_port)
-[ -z "$LISTEN_PORT" ] && LISTEN_PORT="1080"
-# Use a separate IPv6 REDIRECT listener. Binding only to 0.0.0.0 cannot accept
+case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT="1080" ;; esac
+[ "$LISTEN_PORT" -ge 1 ] 2>/dev/null && [ "$LISTEN_PORT" -le 65535 ] 2>/dev/null || LISTEN_PORT="1080"
+# REDIRECT uses a separate IPv6 listener. Binding only to 0.0.0.0 cannot accept
 # connections redirected to ::1, while sharing one port is not portable across
 # Android kernels because IPV6_V6ONLY behavior varies.
-if [ "$LISTEN_PORT" -lt 65535 ] 2>/dev/null; then
-    IPV6_LISTEN_PORT=$((LISTEN_PORT + 1))
-else
-    IPV6_LISTEN_PORT=$((LISTEN_PORT - 1))
+IPV6_LISTEN_PORT=""
+if [ "$PROXY_TYPE" = "redirect" ]; then
+    if [ "$LISTEN_PORT" -lt 65535 ] 2>/dev/null; then
+        IPV6_LISTEN_PORT=$((LISTEN_PORT + 1))
+    else
+        IPV6_LISTEN_PORT=$((LISTEN_PORT - 1))
+    fi
 fi
 
-log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT ipv6_port=$IPV6_LISTEN_PORT"
+log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT${IPV6_LISTEN_PORT:+ ipv6_port=$IPV6_LISTEN_PORT}"
 
 urlencode() {
     printf '%s' "$1" | od -An -tx1 | tr -d ' \n' | awk '
@@ -182,67 +195,34 @@ if [ "$AUTH_ENABLED" = "true" ] && [ -n "$AUTH_USER" ]; then
 fi
 
 case "$PROXY_TYPE" in
-    redirect|red|redir) SCHEME="red" ;;
-    http|socks5|socks4|relay) SCHEME="$PROXY_TYPE" ;;
-    ss|shadowsocks)
-        SCHEME="ss"
-        SS_METHOD=$(jsection_val shadowsocks method)
-        [ -z "$SS_METHOD" ] && SS_METHOD="aes-256-cfb"
-        SS_PASS=$(jsection_val shadowsocks password)
-        LISTEN_URL="${SCHEME}://$(urlencode "$SS_METHOD"):$(urlencode "$SS_PASS")@${LISTEN_ADDR}:${LISTEN_PORT}"
-        ;;
-    *) SCHEME="http" ;;
+    redirect) SCHEME="red" ;;
+    socks5) SCHEME="socks5" ;;
 esac
 
-if [ "$PROXY_TYPE" != "ss" ] && [ "$PROXY_TYPE" != "shadowsocks" ]; then
-    TLS_CERT=$(jsection_val tls cert)
-    TLS_KEY=$(jsection_val tls key)
-    TLS_CA=$(jsection_val tls ca)
-    TLS_ENABLED=false
-    if [ "$PROXY_TYPE" = "tls" ] || [ -n "$TLS_CERT" ]; then
-        TLS_ENABLED=true
-        SCHEME="http+tls"
+QUERY=""
+append_query() {
+    _key="$1" _value="$2"
+    [ -z "$_value" ] && return
+    if [ -z "$QUERY" ]; then QUERY="?"; else QUERY="${QUERY}&"; fi
+    QUERY="${QUERY}${_key}=$(urlencode "$_value")"
+}
+if [ "$PROXY_TYPE" = "redirect" ]; then
+    AUTH_PART=""
+    TRANSPARENT_SNIFFING=$(jsection_val transparent sniffing)
+    TRANSPARENT_SNIFF_TIMEOUT=$(jsection_val transparent sniffing_timeout)
+    TRANSPARENT_SNIFF_FALLBACK=$(jsection_val transparent sniffing_fallback)
+    TRANSPARENT_DIAL_ORIGINAL_DST=$(jsection_val transparent sniffing_dial_original_dst)
+    if [ "$TRANSPARENT_SNIFFING" != "false" ]; then
+        [ -z "$TRANSPARENT_SNIFF_TIMEOUT" ] && TRANSPARENT_SNIFF_TIMEOUT="5s"
+        [ "$TRANSPARENT_SNIFF_FALLBACK" = "false" ] && TRANSPARENT_SNIFF_FALLBACK=false || TRANSPARENT_SNIFF_FALLBACK=true
+        [ "$TRANSPARENT_DIAL_ORIGINAL_DST" = "true" ] && TRANSPARENT_DIAL_ORIGINAL_DST=true || TRANSPARENT_DIAL_ORIGINAL_DST=false
+        append_query sniffing true
+        append_query sniffing.timeout "$TRANSPARENT_SNIFF_TIMEOUT"
+        append_query sniffing.fallback "$TRANSPARENT_SNIFF_FALLBACK"
+        append_query sniffing.dialOriginalDst "$TRANSPARENT_DIAL_ORIGINAL_DST"
     fi
-    WS_PATH=$(jsection_val websocket path)
-    if [ "$PROXY_TYPE" = "ws" ]; then
-        [ -z "$WS_PATH" ] && WS_PATH="/ws"
-        if [ "$TLS_ENABLED" = "true" ]; then SCHEME="http+wss"; else SCHEME="http+ws"; fi
-    elif [ -n "$WS_PATH" ]; then
-        if [ "$TLS_ENABLED" = "true" ]; then SCHEME="http+wss"; else SCHEME="${SCHEME}+ws"; fi
-    fi
-    if [ "$SCHEME" = "red" ]; then AUTH_PART=""; fi
-    LISTEN_URL="${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${LISTEN_PORT}"
-    QUERY=""
-    append_query() {
-        _key="$1" _value="$2"
-        [ -z "$_value" ] && return
-        if [ -z "$QUERY" ]; then QUERY="?"; else QUERY="${QUERY}&"; fi
-        QUERY="${QUERY}${_key}=$(urlencode "$_value")"
-    }
-    append_query path "$WS_PATH"
-    WS_HOST=$(jsection_val websocket host)
-    append_query host "$WS_HOST"
-    append_query certFile "$TLS_CERT"
-    append_query keyFile "$TLS_KEY"
-    append_query caFile "$TLS_CA"
-    if [ "$SCHEME" = "red" ]; then
-        QUERY=""
-        TRANSPARENT_SNIFFING=$(jsection_val transparent sniffing)
-        TRANSPARENT_SNIFF_TIMEOUT=$(jsection_val transparent sniffing_timeout)
-        TRANSPARENT_SNIFF_FALLBACK=$(jsection_val transparent sniffing_fallback)
-        TRANSPARENT_DIAL_ORIGINAL_DST=$(jsection_val transparent sniffing_dial_original_dst)
-        if [ "$TRANSPARENT_SNIFFING" != "false" ]; then
-            [ -z "$TRANSPARENT_SNIFF_TIMEOUT" ] && TRANSPARENT_SNIFF_TIMEOUT="5s"
-            [ "$TRANSPARENT_SNIFF_FALLBACK" = "false" ] && TRANSPARENT_SNIFF_FALLBACK=false || TRANSPARENT_SNIFF_FALLBACK=true
-            [ "$TRANSPARENT_DIAL_ORIGINAL_DST" = "true" ] && TRANSPARENT_DIAL_ORIGINAL_DST=true || TRANSPARENT_DIAL_ORIGINAL_DST=false
-            append_query sniffing true
-            append_query sniffing.timeout "$TRANSPARENT_SNIFF_TIMEOUT"
-            append_query sniffing.fallback "$TRANSPARENT_SNIFF_FALLBACK"
-            append_query sniffing.dialOriginalDst "$TRANSPARENT_DIAL_ORIGINAL_DST"
-        fi
-    fi
-    LISTEN_URL="${LISTEN_URL}${QUERY}"
 fi
+LISTEN_URL="${SCHEME}://${AUTH_PART}${LISTEN_ADDR}:${LISTEN_PORT}${QUERY}"
 
 log_msg "Listen configured: scheme=$SCHEME addr=$LISTEN_ADDR port=$LISTEN_PORT"
 
@@ -425,17 +405,28 @@ generate_runtime_config() {
     _add_service() {
         _port="$1"
         _svc="{\"name\":\"service-$_port\",\"addr\":\"$_esc_listen_addr:$_port\","
-        _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val,\"sniffing.timeout\":\"$(json_escape "$_sniff_timeout")\",\"sniffing.fallback\":$_sniff_fallback_val,\"sniffing.dialOriginalDst\":$_dial_original_dst_val}},"
-        _svc="${_svc}\"listener\":{\"type\":\"red\"}}"
+        if [ "$PROXY_TYPE" = "socks5" ]; then
+            _handler_auth=""
+            if [ "$AUTH_ENABLED" = "true" ] && [ -n "$AUTH_USER" ]; then
+                _handler_auth=",\"auth\":{\"username\":\"$(json_escape "$AUTH_USER")\",\"password\":\"$(json_escape "$AUTH_PASS")\"}"
+            fi
+            _svc="${_svc}\"handler\":{\"type\":\"socks5\",\"chain\":\"chain-0\"$_handler_auth},"
+            _svc="${_svc}\"listener\":{\"type\":\"tcp\"}}"
+        else
+            _svc="${_svc}\"handler\":{\"type\":\"red\",\"chain\":\"chain-0\",\"metadata\":{\"sniffing\":$_sniffing_val,\"sniffing.timeout\":\"$(json_escape "$_sniff_timeout")\",\"sniffing.fallback\":$_sniff_fallback_val,\"sniffing.dialOriginalDst\":$_dial_original_dst_val}},"
+            _svc="${_svc}\"listener\":{\"type\":\"red\"}}"
+        fi
         if [ -n "$_services_json" ]; then _services_json="${_services_json},"; fi
         _services_json="${_services_json}$_svc"
     }
     _add_service "$LISTEN_PORT"
-    # ip6tables REDIRECT targets this dedicated IPv6 listener.
-    _saved_listen_addr="$_esc_listen_addr"
-    _esc_listen_addr="[::]"
-    _add_service "$IPV6_LISTEN_PORT"
-    _esc_listen_addr="$_saved_listen_addr"
+    if [ "$PROXY_TYPE" = "redirect" ]; then
+        # ip6tables REDIRECT targets this dedicated IPv6 listener.
+        _saved_listen_addr="$_esc_listen_addr"
+        _esc_listen_addr="[::]"
+        _add_service "$IPV6_LISTEN_PORT"
+        _esc_listen_addr="$_saved_listen_addr"
+    fi
     if [ -n "$MULTI_LISTEN" ]; then
         OLD_IFS=$IFS
         IFS=','
@@ -483,7 +474,10 @@ if [ "$USE_CONFIG" = "false" ]; then
         [ -n "$ROUTING_BYPASS" ] && FORWARD_URL="${FORWARD_URL}&bypass=$(urlencode "$ROUTING_BYPASS")"
     fi
 
-    set -- -L "$LISTEN_URL" -L "red://[::]:${IPV6_LISTEN_PORT}${QUERY}"
+    set -- -L "$LISTEN_URL"
+    if [ "$PROXY_TYPE" = "redirect" ]; then
+        set -- "$@" -L "red://[::]:${IPV6_LISTEN_PORT}${QUERY}"
+    fi
     OLD_IFS=$IFS
     IFS=','
     for EXTRA_PORT in $MULTI_LISTEN; do
@@ -540,15 +534,23 @@ sleep 2
 if kill -0 "$GOST_PID" 2>/dev/null; then
     echo "$GOST_PID" > "$PIDFILE"
     start_log_guard "$GOST_PID"
-    if ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" start; then
-        log_msg "ERROR: failed to install transparent proxy rules"
-        kill "$GOST_PID" 2>/dev/null
-        rm -f "$PIDFILE"
-        echo "ERROR: failed to install transparent proxy rules"
-        exit 1
+    if [ "$PROXY_TYPE" = "redirect" ]; then
+        if ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" start; then
+            log_msg "ERROR: failed to install transparent proxy rules"
+            kill "$GOST_PID" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "ERROR: failed to install transparent proxy rules"
+            exit 1
+        fi
+        MODE_NAME="REDIRECT transparent proxy"
+    else
+        # Clear rules and DNS compatibility processes left by a previous
+        # REDIRECT run. SOCKS5 must not alter global Android traffic handling.
+        sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1 || true
+        MODE_NAME="SOCKS5 proxy"
     fi
-    log_msg "gost transparent proxy started successfully (PID: $GOST_PID)"
-    echo "gost transparent proxy started successfully (PID: $GOST_PID)"
+    log_msg "gost $MODE_NAME started successfully (PID: $GOST_PID)"
+    echo "gost $MODE_NAME started successfully (PID: $GOST_PID)"
 else
     log_msg "ERROR: gost failed to start - check config"
     echo "ERROR: gost failed to start"

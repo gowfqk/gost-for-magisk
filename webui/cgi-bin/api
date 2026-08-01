@@ -247,8 +247,24 @@ get_active_node() {
     fi
 }
 
+normalize_proxy_type() {
+    case "$1" in
+        ""|redirect|red|redir) printf '%s' redirect ;;
+        socks|socks5) printf '%s' socks5 ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
 normalize_config() {
-    printf '%s' "$1" | sed 's/"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"/"proxy_type": "redirect"/'
+    _data="$1"
+    _proxy_type=$(printf '%s' "$_data" | grep -o '"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
+    _proxy_type=$(normalize_proxy_type "$_proxy_type")
+    if printf '%s' "$_data" | grep -q '"proxy_type"[[:space:]]*:'; then
+        _sed_proxy_type=$(printf '%s' "$_proxy_type" | sed 's/[\\&|]/\\&/g')
+        printf '%s' "$_data" | sed "s|\"proxy_type\"[[:space:]]*:[[:space:]]*\"[^\"]*\"|\"proxy_type\": \"$_sed_proxy_type\"|"
+    else
+        printf '%s' "$_data" | sed '0,/{/s||{\n    "proxy_type": "redirect",|'
+    fi
 }
 
 valid_config() {
@@ -256,6 +272,8 @@ valid_config() {
     [ -n "$_data" ] && [ ${#_data} -le 65536 ] || return 1
     printf '%s' "$_data" | grep -q '^[[:space:]]*{' || return 1
     printf '%s' "$_data" | grep -q '}[[:space:]]*$' || return 1
+    _proxy_type=$(printf '%s' "$_data" | grep -o '"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
+    case "$_proxy_type" in redirect|socks5) ;; *) return 1 ;; esac
     _listen_port=$(printf '%s' "$_data" | grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
     _webui_port=$(printf '%s' "$_data" | grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
     [ -n "$_listen_port" ] && [ "$_listen_port" -ge 1 ] 2>/dev/null && [ "$_listen_port" -le 65535 ] 2>/dev/null || return 1
@@ -294,7 +312,8 @@ case "$ENDPOINT" in
         fi
         ARCH=$(getprop ro.product.cpu.abi 2>/dev/null || echo "unknown")
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
-        PT="redirect"
+        PT=$(normalize_proxy_type "$(jval proxy_type)")
+        case "$PT" in redirect|socks5) ;; *) PT="redirect" ;; esac
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         WP=$(jval webui_port);  [ -z "$WP" ] && WP="8080"
         ACTIVE_NODE=$(get_active_node)
@@ -345,8 +364,8 @@ case "$ENDPOINT" in
                 _display_name=$(jval_file "$_f" node_name)
                 [ -z "$_display_name" ] && _display_name="$_name"
                 _display_name=$(json_escape_value "$_display_name")
-                _ptype=$(jval_file "$_f" proxy_type)
-                [ -z "$_ptype" ] && _ptype="http"
+                _ptype=$(normalize_proxy_type "$(jval_file "$_f" proxy_type)")
+                case "$_ptype" in redirect|socks5) ;; *) _ptype="redirect" ;; esac
                 _lport=$(jval_file "$_f" listen_port)
                 [ -z "$_lport" ] && _lport="1080"
                 _uaddr=$(jsection_val_file "$_f" upstream addr)
@@ -585,7 +604,12 @@ case "$ENDPOINT" in
         ;;
 
     command)
-        PT="redirect"
+        PT=$(normalize_proxy_type "$(jval proxy_type)")
+        case "$PT" in
+            redirect) LISTEN_SCHEME="red" ;;
+            socks5) LISTEN_SCHEME="socks5" ;;
+            *) PT="redirect"; LISTEN_SCHEME="red" ;;
+        esac
         LA=$(jval listen_addr); [ -z "$LA" ] && LA="0.0.0.0"
         LP=$(jval listen_port); [ -z "$LP" ] && LP="1080"
         # Check if geodata config file mode would be used
@@ -598,7 +622,7 @@ case "$ENDPOINT" in
             printf '{"command":"%s"}' "$CMD_ESCAPED"
         else
             # Build full command preview (command-line mode)
-            CMD="-L ${PT}://${LA}:${LP}"
+            CMD="-L ${LISTEN_SCHEME}://${LA}:${LP}"
             if [ "$UP_EN" = "true" ]; then
                 UP_TYPE=$(jsection_val upstream type); [ -z "$UP_TYPE" ] && UP_TYPE="http"
                 UP_ADDR=$(jsection_val upstream addr)

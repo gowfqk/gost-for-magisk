@@ -33,6 +33,36 @@ fail() {
 GOST_PID=$(cat "$PIDFILE" 2>/dev/null)
 [ -n "$GOST_PID" ] && kill -0 "$GOST_PID" 2>/dev/null || fail process "gost process is not running"
 
+PROXY_TYPE=$(jval proxy_type)
+case "$PROXY_TYPE" in
+    socks|socks5) PROXY_TYPE="socks5" ;;
+    ""|redirect|red|redir) PROXY_TYPE="redirect" ;;
+    *) fail config "unsupported local proxy type: $PROXY_TYPE" ;;
+esac
+LISTEN_PORT=$(jval listen_port)
+case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT=1080 ;; esac
+
+BB=""
+for path in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /system/bin/busybox /system/xbin/busybox; do
+    [ -x "$path" ] && BB="$path" && break
+done
+[ -z "$BB" ] && BB=$(command -v busybox 2>/dev/null)
+[ -n "$BB" ] || fail client "busybox not found"
+
+if [ "$PROXY_TYPE" = "socks5" ]; then
+    # Offer both no-auth and username/password methods. A valid SOCKS5 server
+    # replies with version 5 and one selected method (00 or 02).
+    HANDSHAKE=$(printf '\005\002\000\002' | "$BB" nc -w 5 127.0.0.1 "$LISTEN_PORT" 2>/dev/null | "$BB" od -An -tx1 -N2 | tr -d ' \n')
+    case "$HANDSHAKE" in
+        0500|0502)
+            cleanup
+            printf '{"success":true,"stage":"complete","message":"SOCKS5 listener handshake succeeded","proxy_type":"socks5","listen_port":%s}' "$LISTEN_PORT"
+            exit 0
+            ;;
+        *) fail handshake "SOCKS5 handshake failed (reply=$HANDSHAKE)" ;;
+    esac
+fi
+
 IPT=$(command -v iptables 2>/dev/null)
 [ -z "$IPT" ] && IPT="/system/bin/iptables"
 [ -x "$IPT" ] || fail iptables "iptables not found"
@@ -51,16 +81,6 @@ fi
 if [ -x "$IP6T" ]; then
     "$IP6T" -t filter -C OUTPUT -p udp -j "$QUIC_CHAIN" 2>/dev/null || fail iptables "IPv6 QUIC fallback rule is missing"
 fi
-
-LISTEN_PORT=$(jval listen_port)
-case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT=1080 ;; esac
-
-BB=""
-for path in /data/adb/magisk/busybox /data/adb/ksu/bin/busybox /system/bin/busybox /system/xbin/busybox; do
-    [ -x "$path" ] && BB="$path" && break
-done
-[ -z "$BB" ] && BB=$(command -v busybox 2>/dev/null)
-[ -n "$BB" ] || fail client "busybox not found"
 
 # /data/adb is intentionally inaccessible to Android shell UID 2000 on many
 # Magisk/KernelSU setups. Copy BusyBox to shell-accessible storage for this
@@ -87,5 +107,5 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 cleanup
-printf '{"success":true,"stage":"complete","message":"Transparent proxy request succeeded","listen_port":%s,"ipv6_proxy":%s,"elapsed":%s,"test_url":"%s"}' \
+printf '{"success":true,"stage":"complete","message":"REDIRECT transparent proxy request succeeded","proxy_type":"redirect","listen_port":%s,"ipv6_proxy":%s,"elapsed":%s,"test_url":"%s"}' \
     "$LISTEN_PORT" "$IPV6_PROXY_ENABLED" "$ELAPSED" "$TEST_URL"
