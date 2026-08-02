@@ -614,14 +614,14 @@
             body: config
         })
             .then(function (res) {
-                if (res.success) {
-                    showToast(t("config_saved"), "success");
-                } else {
-                    showToast(t("save_failed_msg", {msg: res.message || ""}), "error");
-                }
+                if (!res.success) throw new Error(res.message || t("save_failed"));
+                loadedConfig = cloneObject(config);
+                showToast(t("config_saved") + (res.restarted ? " · " + t("restart_ok") : ""), "success");
+                loadStatus();
+                loadCommand();
             })
-            .catch(function () {
-                showToast(t("save_failed"), "error");
+            .catch(function (err) {
+                showToast(t("save_failed_msg", {msg: (err && err.message) || ""}), "error");
             });
     }
 
@@ -792,17 +792,14 @@
             method: "POST",
             body: { name: name }
         }).then(function (res) {
-            if (res.success) {
-                showToast(t("node_switched", {name: name}), "success");
-                loadNodes();
-                loadConfig();
-                loadStatus();
-                loadCommand();
-            } else {
-                showToast(res.message || t("switch_failed"), "error");
-            }
-        }).catch(function () {
-            showToast(t("switch_failed"), "error");
+            if (!res.success) throw new Error(res.message || t("switch_failed"));
+            showToast(t("node_switched", {name: name}) + (res.restarted ? " · " + t("restart_ok") : ""), "success");
+            loadNodes();
+            loadConfig();
+            loadStatus();
+            loadCommand();
+        }).catch(function (err) {
+            showToast((err && err.message) || t("switch_failed"), "error");
         });
     }
 

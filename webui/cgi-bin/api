@@ -313,6 +313,30 @@ sync_active_node() {
     fi
 }
 
+proxy_is_running() {
+    [ -f "$PIDFILE" ] || return 1
+    _pid=$(cat "$PIDFILE" 2>/dev/null)
+    case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_pid" 2>/dev/null
+}
+
+# Apply changed listener mode, upstream and interception rules immediately, but
+# preserve an intentionally stopped service. This prevents config.json from
+# saying REDIRECT while the live process is still the previous SOCKS5 service.
+RUNTIME_ERROR_FILE="/tmp/gost-runtime-error.$$"
+apply_runtime_if_running() {
+    rm -f "$RUNTIME_ERROR_FILE"
+    proxy_is_running || return 0
+    sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
+    sleep 1
+    sh "$MODDIR/scripts/start.sh" "$MODDIR" >"$RUNTIME_ERROR_FILE" 2>&1
+    if proxy_is_running; then
+        rm -f "$RUNTIME_ERROR_FILE"
+        return 0
+    fi
+    return 1
+}
+
 # ---- Route by endpoint ----
 case "$ENDPOINT" in
     status)
@@ -357,10 +381,25 @@ case "$ENDPOINT" in
                 printf '{"error":"Config not found"}'
             fi
         elif [ "$REQUEST_METHOD" = "POST" ]; then
+            WAS_RUNNING=false
+            proxy_is_running && WAS_RUNNING=true
             if write_config "$BODY"; then
                 sync_active_node
+                if [ "$WAS_RUNNING" = "true" ]; then
+                    apply_runtime_if_running
+                    APPLY_RC=$?
+                else
+                    APPLY_RC=0
+                fi
                 json_header
-                printf '{"success":true,"message":"Config saved"}'
+                if [ "$APPLY_RC" -eq 0 ]; then
+                    printf '{"success":true,"message":"Config saved and applied","restarted":%s}' "$WAS_RUNNING"
+                else
+                    APPLY_OUTPUT=$(cat "$RUNTIME_ERROR_FILE" 2>/dev/null)
+                    rm -f "$RUNTIME_ERROR_FILE"
+                    [ -z "$APPLY_OUTPUT" ] && APPLY_OUTPUT="Config saved but gost failed to restart"
+                    printf '{"success":false,"message":"%s","saved":true}' "$(json_escape_value "$APPLY_OUTPUT")"
+                fi
             else
                 json_header
                 printf '{"success":false,"message":"Invalid config"}'
@@ -495,10 +534,25 @@ case "$ENDPOINT" in
             json_header
             printf '{"success":false,"message":"Node not found"}'
         else
+            WAS_RUNNING=false
+            proxy_is_running && WAS_RUNNING=true
             cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
             echo "$NODE_NAME" > "$ACTIVE_FILE"
+            if [ "$WAS_RUNNING" = "true" ]; then
+                apply_runtime_if_running
+                APPLY_RC=$?
+            else
+                APPLY_RC=0
+            fi
             json_header
-            printf '{"success":true,"message":"Switched to node","name":"%s"}' "$NODE_NAME"
+            if [ "$APPLY_RC" -eq 0 ]; then
+                printf '{"success":true,"message":"Switched to node","name":"%s","restarted":%s}' "$NODE_NAME" "$WAS_RUNNING"
+            else
+                APPLY_OUTPUT=$(cat "$RUNTIME_ERROR_FILE" 2>/dev/null)
+                rm -f "$RUNTIME_ERROR_FILE"
+                [ -z "$APPLY_OUTPUT" ] && APPLY_OUTPUT="Node switched but gost failed to restart"
+                printf '{"success":false,"message":"%s","switched":true,"name":"%s"}' "$(json_escape_value "$APPLY_OUTPUT")" "$NODE_NAME"
+            fi
         fi
         ;;
 
@@ -525,12 +579,17 @@ case "$ENDPOINT" in
         ;;
 
     start)
-        ACTION_OUTPUT=$(sh "$MODDIR/scripts/start.sh" "$MODDIR" 2>&1)
+        ACTION_CAPTURE="/tmp/gost-start-output.$$"
+        rm -f "$ACTION_CAPTURE"
+        sh "$MODDIR/scripts/start.sh" "$MODDIR" >"$ACTION_CAPTURE" 2>&1
         sleep 1
         json_header
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            rm -f "$ACTION_CAPTURE"
             printf '{"success":true,"message":"gost started (PID: %s)"}' "$(cat "$PIDFILE")"
         else
+            ACTION_OUTPUT=$(cat "$ACTION_CAPTURE" 2>/dev/null)
+            rm -f "$ACTION_CAPTURE"
             [ -z "$ACTION_OUTPUT" ] && ACTION_OUTPUT="gost failed to start"
             printf '{"success":false,"message":"%s"}' "$(json_escape_value "$ACTION_OUTPUT")"
         fi
@@ -550,12 +609,17 @@ case "$ENDPOINT" in
     restart)
         sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
         sleep 1
-        ACTION_OUTPUT=$(sh "$MODDIR/scripts/start.sh" "$MODDIR" 2>&1)
+        ACTION_CAPTURE="/tmp/gost-start-output.$$"
+        rm -f "$ACTION_CAPTURE"
+        sh "$MODDIR/scripts/start.sh" "$MODDIR" >"$ACTION_CAPTURE" 2>&1
         sleep 1
         json_header
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            rm -f "$ACTION_CAPTURE"
             printf '{"success":true,"message":"gost restarted (PID: %s)"}' "$(cat "$PIDFILE")"
         else
+            ACTION_OUTPUT=$(cat "$ACTION_CAPTURE" 2>/dev/null)
+            rm -f "$ACTION_CAPTURE"
             [ -z "$ACTION_OUTPUT" ] && ACTION_OUTPUT="gost failed to restart"
             printf '{"success":false,"message":"%s"}' "$(json_escape_value "$ACTION_OUTPUT")"
         fi

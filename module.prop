@@ -1,6 +1,6 @@
 id=gost_proxy
 name=Gost Proxy Module
-version=v1.9.30
-versionCode=10930
+version=v1.9.32
+versionCode=10932
 author=gost-magisk
 description=Run gost REDIRECT or SOCKS5 local proxy with WebUI configuration and GeoData auto-split

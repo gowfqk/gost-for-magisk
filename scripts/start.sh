@@ -30,7 +30,7 @@ start_log_guard() {
             sleep 30
             trim_log
         done
-    ) &
+    ) </dev/null >/dev/null 2>&1 &
 }
 
 trim_log
@@ -523,7 +523,7 @@ if [ "$USE_CONFIG" = "true" ]; then
         echo "ERROR: failed to enter gost directory"
         exit 1
     }
-    "$GOST_BIN" -C "$RUNTIME_CONFIG" >> "$LOGFILE" 2>&1 &
+    "$GOST_BIN" -C "$RUNTIME_CONFIG" </dev/null >> "$LOGFILE" 2>&1 &
 else
     if [ -n "$FORWARD_URL" ]; then
         log_msg "Mode: command-line (listener and upstream)"
@@ -535,7 +535,7 @@ else
         echo "ERROR: failed to enter gost directory"
         exit 1
     }
-    "$GOST_BIN" "$@" >> "$LOGFILE" 2>&1 &
+    "$GOST_BIN" "$@" </dev/null >> "$LOGFILE" 2>&1 &
 fi
 
 GOST_PID=$!
