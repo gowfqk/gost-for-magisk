@@ -10,8 +10,9 @@
 #   - Verify the binary after installation
 #
 # Usage:
-#   sh download_gost.sh          # Download to default location
-#   sh download_gost.sh /path    # Download to specified directory
+#   sh download_gost.sh                       # Download directly to default location
+#   sh download_gost.sh /path direct          # Download directly
+#   sh download_gost.sh /path accelerated     # Download through https://ghfast.top
 #
 
 set -e
@@ -21,18 +22,9 @@ GOST_REPO="go-gost/gost"
 GOST_API="https://api.github.com/repos/${GOST_REPO}/releases/latest"
 GOST_RELEASE_BASE="https://github.com/${GOST_REPO}/releases/download"
 
-# GitHub mirror/proxy servers for China network
-# Will try each one in order until download succeeds
-MIRRORS="
-https://mirror.ghproxy.com
-https://gh-proxy.com
-https://ghps.cc
-https://github.moeyy.xyz
-https://ghproxy.net
-"
+ACCELERATOR="https://ghfast.top"
+DOWNLOAD_MODE="direct"
 
-# Timeout for network detection (seconds)
-DETECT_TIMEOUT=5
 # Timeout for download (seconds)
 DOWNLOAD_TIMEOUT=120
 
@@ -124,56 +116,27 @@ detect_arch() {
     return 0
 }
 
-# ============ China Network Detection ============
+# ============ Download Source ============
 
-detect_china_network() {
-    IS_CHINA=0
-
-    log "Detecting network environment..."
-
-    # Method 1: Try GitHub API with short timeout
-    # If GitHub is unreachable or very slow, likely in a restricted network
-    if has_cmd curl; then
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            --connect-timeout "$DETECT_TIMEOUT" \
-            --max-time "$((DETECT_TIMEOUT * 2))" \
-            "$GOST_API" 2>/dev/null || echo "000")
-    elif has_cmd wget; then
-        HTTP_CODE=$(wget -q -O /dev/null \
-            --timeout="$DETECT_TIMEOUT" \
-            --tries=1 \
-            "$GOST_API" 2>/dev/null && echo "200" || echo "000")
+selected_url() {
+    _url="$1"
+    if [ "$DOWNLOAD_MODE" = "accelerated" ]; then
+        printf '%s/%s' "$ACCELERATOR" "$_url"
     else
-        err "Neither curl nor wget found, cannot detect network"
-        return 1
+        printf '%s' "$_url"
     fi
-
-    if [ "$HTTP_CODE" = "200" ]; then
-        log "GitHub API reachable (HTTP $HTTP_CODE), using direct connection"
-        IS_CHINA=0
-    else
-        warn "GitHub API unreachable or slow (HTTP $HTTP_CODE), switching to mirror"
-        IS_CHINA=1
-    fi
-
-    # Method 2 (supplementary): Check IP geolocation
-    # Only if the first method was inconclusive or to confirm
-    if [ "$IS_CHINA" = "0" ]; then
-        # Double-check with a quick geo lookup (non-critical, ignore failures)
-        if has_cmd curl; then
-            COUNTRY=$(curl -s --connect-timeout 3 --max-time 6 \
-                "https://ipinfo.io/country" 2>/dev/null || echo "")
-        fi
-        if [ "$COUNTRY" = "CN" ]; then
-            log "IP geolocation confirms China (CN), using mirror"
-            IS_CHINA=1
-        fi
-    fi
-
-    return 0
 }
 
 # ============ Version Detection ============
+
+fetch_text() {
+    _url="$1"
+    if has_cmd curl; then
+        curl -fsSL --connect-timeout 10 --max-time 30 "$_url" 2>/dev/null || true
+    elif has_cmd wget; then
+        wget -qO- --timeout=30 "$_url" 2>/dev/null || true
+    fi
+}
 
 get_latest_version() {
     log "Fetching latest gost release version..."
@@ -183,54 +146,31 @@ get_latest_version() {
         return 1
     fi
 
-    # Try direct first, then via mirrors
-    RAW_JSON=""
+    # ghfast.top is intended for GitHub pages and release assets, not the
+    # api.github.com host. Always try the official API directly first so its
+    # asset digests remain available when reachable.
+    RAW_JSON=$(fetch_text "$GOST_API")
+    GOST_TAG=$(printf '%s' "$RAW_JSON" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' | head -1)
 
-    if has_cmd curl; then
-        # Direct attempt
-        RAW_JSON=$(curl -sL --connect-timeout 10 --max-time 30 "$GOST_API" 2>/dev/null || echo "")
-
-        # If failed and in China, try mirror for API
-        if [ -z "$RAW_JSON" ] && [ "$IS_CHINA" = "1" ]; then
-            for MIRROR in $MIRRORS; do
-                log "Trying API via mirror: $MIRROR"
-                RAW_JSON=$(curl -sL --connect-timeout 10 --max-time 30 \
-                    "${MIRROR}/${GOST_API}" 2>/dev/null || echo "")
-                if [ -n "$RAW_JSON" ]; then
-                    break
-                fi
-            done
-        fi
-    elif has_cmd wget; then
-        RAW_JSON=$(wget -qO- --timeout=30 "$GOST_API" 2>/dev/null || echo "")
-        if [ -z "$RAW_JSON" ] && [ "$IS_CHINA" = "1" ]; then
-            for MIRROR in $MIRRORS; do
-                log "Trying API via mirror: $MIRROR"
-                RAW_JSON=$(wget -qO- --timeout=30 \
-                    "${MIRROR}/${GOST_API}" 2>/dev/null || echo "")
-                if [ -n "$RAW_JSON" ]; then
-                    break
-                fi
-            done
+    # If the API is blocked, parse the public latest-release HTML page through
+    # the selected transport. This works with ghfast.top and does not require
+    # GitHub API access.
+    if [ -z "$GOST_TAG" ]; then
+        LATEST_PAGE_URL=$(selected_url "https://github.com/${GOST_REPO}/releases/latest")
+        log "GitHub API unavailable; resolving latest tag from release page"
+        RELEASE_HTML=$(fetch_text "$LATEST_PAGE_URL")
+        GOST_TAG=$(printf '%s' "$RELEASE_HTML" | grep -o "/${GOST_REPO}/releases/tag/v[0-9][0-9A-Za-z._-]*" | head -1 | sed 's#.*/tag/##')
+        if [ -z "$GOST_TAG" ]; then
+            GOST_TAG=$(printf '%s' "$RELEASE_HTML" | grep -o '<title>[^<]*v[0-9][0-9A-Za-z._-]*' | head -1 | grep -o 'v[0-9][0-9A-Za-z._-]*$')
         fi
     fi
-
-    if [ -z "$RAW_JSON" ]; then
-        err "Failed to fetch release info from GitHub API"
-        return 1
-    fi
-
-    # Extract tag_name (handles both "v3.2.6" and "3.2.6")
-    GOST_TAG=$(echo "$RAW_JSON" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' | head -1)
 
     if [ -z "$GOST_TAG" ]; then
-        err "Failed to parse release tag from API response"
+        err "Failed to resolve the latest Gost release tag"
         return 1
     fi
 
-    # Strip leading 'v' for version number used in asset names
-    GOST_VERSION=$(echo "$GOST_TAG" | sed 's/^v//')
-
+    GOST_VERSION=$(printf '%s' "$GOST_TAG" | sed 's/^v//')
     log "Latest gost version: $GOST_TAG (asset version: $GOST_VERSION)"
     return 0
 }
@@ -271,49 +211,39 @@ download_binary() {
     EXPECTED_SHA256=$(printf '%s' "$RAW_JSON" | tr -d '[:space:]' | sed 's/,"name":/\
 "name":/g' | grep "^\"name\":\"${ASSET_NAME}\"" | grep -o '"digest":"sha256:[0-9A-Fa-f]*"' | head -1 | sed 's/.*sha256://; s/"$//')
     if [ -z "$EXPECTED_SHA256" ]; then
-        err "Official SHA256 digest not found for $ASSET_NAME"
+        CHECKSUMS_URL=$(selected_url "${GOST_RELEASE_BASE}/${GOST_TAG}/checksums.txt")
+        log "Fetching checksums.txt through selected source"
+        CHECKSUMS=$(fetch_text "$CHECKSUMS_URL")
+        EXPECTED_SHA256=$(printf '%s\n' "$CHECKSUMS" | awk -v asset="$ASSET_NAME" '$2 == asset || $2 == "*" asset { print $1; exit }')
+    fi
+    case "$EXPECTED_SHA256" in
+        [0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]*) ;;
+        *)
+            err "Official SHA256 digest not found for $ASSET_NAME"
+            rm -rf "$TMPDIR"
+            return 1
+            ;;
+    esac
+    [ "${#EXPECTED_SHA256}" -eq 64 ] || {
+        err "Invalid SHA256 digest length for $ASSET_NAME"
         rm -rf "$TMPDIR"
         return 1
-    fi
+    }
 
     log "Target asset: $ASSET_NAME"
 
-    # Try direct download first
-    log "Attempting direct download from GitHub..."
-    if do_download "$DIRECT_URL" "$TARFILE"; then
-        if [ -s "$TARFILE" ]; then
-            log "Direct download succeeded"
-            DOWNLOAD_OK=1
-        else
-            warn "Direct download produced empty file"
-            DOWNLOAD_OK=0
-        fi
+    DOWNLOAD_URL=$(selected_url "$DIRECT_URL")
+    log "Downloading via mode: $DOWNLOAD_MODE"
+    if do_download "$DOWNLOAD_URL" "$TARFILE" && [ -s "$TARFILE" ]; then
+        log "Download succeeded"
+        DOWNLOAD_OK=1
     else
-        warn "Direct download failed"
+        warn "Download failed"
         DOWNLOAD_OK=0
     fi
 
-    # If direct failed, try mirrors
     if [ "$DOWNLOAD_OK" = "0" ]; then
-        log "Trying mirror downloads..."
-
-        for MIRROR in $MIRRORS; do
-            MIRROR_URL="${MIRROR}/${DIRECT_URL}"
-            log "Trying: $MIRROR"
-
-            if do_download "$MIRROR_URL" "$TARFILE"; then
-                if [ -s "$TARFILE" ]; then
-                    log "Mirror download succeeded: $MIRROR"
-                    DOWNLOAD_OK=1
-                    break
-                fi
-            fi
-            warn "Mirror failed: $MIRROR"
-        done
-    fi
-
-    if [ "$DOWNLOAD_OK" = "0" ]; then
-        err "All download attempts failed"
+        err "Gost download failed using mode: $DOWNLOAD_MODE"
         rm -rf "$TMPDIR"
         return 1
     fi
@@ -456,8 +386,17 @@ main() {
     esac
 
     TARGET_DIR="${1:-$DEFAULT_TARGET}"
+    DOWNLOAD_MODE="${2:-direct}"
+    case "$DOWNLOAD_MODE" in
+        direct|accelerated) ;;
+        *)
+            err "Unsupported download mode: $DOWNLOAD_MODE (use direct or accelerated)"
+            exit 1
+            ;;
+    esac
 
     log "Target directory: $TARGET_DIR"
+    log "Download mode: $DOWNLOAD_MODE"
     echo ""
 
     # Step 1: Detect architecture
@@ -467,16 +406,12 @@ main() {
     fi
     echo ""
 
-    # Step 2: Detect network environment
-    log "Step 2/5: Detecting network environment..."
-    if ! detect_china_network; then
-        warn "Network detection failed, will try both direct and mirror"
-        IS_CHINA=1  # Default to trying mirrors as fallback
-    fi
-    if [ "$IS_CHINA" = "1" ]; then
-        log "Network: China/restricted - mirrors will be used as fallback"
+    # Step 2: Use the source explicitly selected by the installer or caller.
+    log "Step 2/5: Selecting download source..."
+    if [ "$DOWNLOAD_MODE" = "accelerated" ]; then
+        log "Source: $ACCELERATOR"
     else
-        log "Network: Direct - GitHub accessible"
+        log "Source: GitHub direct"
     fi
     echo ""
 

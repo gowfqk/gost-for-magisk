@@ -25,7 +25,10 @@ mkdir -p "$NODES_DIR"
 
 usable_gost_binary() {
     _bin="$1"
-    [ -s "$_bin" ] && ! grep -q "Placeholder" "$_bin" 2>/dev/null
+    [ -s "$_bin" ] || return 1
+    [ -x "$_bin" ] || chmod 755 "$_bin" 2>/dev/null || return 1
+    _version=$("$_bin" -V 2>&1 || true)
+    printf '%s' "$_version" | grep -qi 'gost'
 }
 
 atomic_copy() {
@@ -724,7 +727,9 @@ case "$ENDPOINT" in
                 esac
                 CMD="${CMD} -F ${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
                 UP_WS=$(jsection_val upstream ws_path)
-                CMD="${CMD}?resolver=223.5.5.5%2C1.1.1.1"
+                DNS_UPSTREAMS=$(jval dns_upstreams); [ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5,119.29.29.29"
+                DNS_QUERY=$(printf '%s' "$DNS_UPSTREAMS" | sed 's/,/%2C/g')
+                CMD="${CMD}?resolver=${DNS_QUERY}"
                 if [ -n "$UP_WS" ]; then
                     CMD="${CMD}&path=${UP_WS}"
                 fi

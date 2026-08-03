@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/binary"
+	"net"
 	"testing"
+	"time"
 )
 
 func makeQuery(name string, qtype uint16) []byte {
@@ -28,6 +30,19 @@ func splitName(name string) []string {
 		}
 	}
 	return labels
+}
+
+func TestParseUpstreams(t *testing.T) {
+	got := parseUpstreams("223.5.5.5, 119.29.29.29:53,223.5.5.5")
+	want := []string{"223.5.5.5:53", "119.29.29.29:53"}
+	if len(got) != len(want) {
+		t.Fatalf("parseUpstreams() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseUpstreams()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
 }
 
 func TestParseQuestion(t *testing.T) {
@@ -66,5 +81,44 @@ func TestNoDataPreservesQuestion(t *testing.T) {
 	}
 	if string(response[12:]) != string(query[12:]) {
 		t.Fatal("question section changed")
+	}
+}
+
+func TestForwardUDPUsesTotalTimeout(t *testing.T) {
+	silent, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer silent.Close()
+
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	go func() {
+		buf := make([]byte, 65535)
+		n, addr, readErr := listener.ReadFrom(buf)
+		if readErr == nil {
+			_, _ = listener.WriteTo(buf[:n], addr)
+		}
+	}()
+
+	s := server{
+		upstreams: []string{silent.LocalAddr().String(), listener.LocalAddr().String()},
+		timeout:   2 * time.Second,
+	}
+	query := makeQuery("example.com", 1)
+	started := time.Now()
+	response, err := s.forwardUDP(query)
+	if err != nil {
+		t.Fatalf("forwardUDP() error = %v", err)
+	}
+	if string(response) != string(query) {
+		t.Fatal("unexpected upstream response")
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("forwardUDP() took %v, want less than total timeout", elapsed)
 	}
 }

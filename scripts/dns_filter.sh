@@ -8,6 +8,7 @@ DNS_BIN_DIR="$DNS_DIR/bin"
 DNS_DOMAINS="$DNS_DIR/ipv4-only-domains.txt"
 DNS_LOG="$MODDIR/logs/dns-filter.log"
 DNS_PIDFILE="/tmp/gost-dns-filter.pid"
+DNS_UPSTREAM_FILE="/tmp/gost-dns-upstreams.txt"
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] dns-filter: $1" >> "$DNS_LOG"
@@ -53,9 +54,39 @@ if [ ! -s "$DNS_BIN" ] || [ ! -s "$DNS_DOMAINS" ]; then
 fi
 chmod 755 "$DNS_BIN"
 
-# Use public IPv4 resolvers directly. The process runs as root, and the DNS
-# interception chain excludes UID 0, preventing its upstream query from looping.
-"$DNS_BIN" -listen "127.0.0.1:$DNS_PORT" -upstream "223.5.5.5:53" -domains "$DNS_DOMAINS" >> "$DNS_LOG" 2>&1 &
+# dns_upstreams is a top-level comma-separated config value. Only literal IPv4
+# addresses are accepted so malformed values or hostnames cannot create a DNS
+# bootstrap loop. If it is absent, prefer Android's active-network DNS and then
+# use domestic public resolvers. 1.1.1.1 and 8.8.8.8 are deliberately excluded
+# from defaults because several mainland mobile networks silently drop them.
+CONFIG="$MODDIR/gost/config.json"
+CONFIGURED_UPSTREAMS=$(grep -o '"dns_upstreams"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"//' | sed 's/"$//')
+: > "$DNS_UPSTREAM_FILE"
+if [ -n "$CONFIGURED_UPSTREAMS" ]; then
+    OLD_IFS=$IFS
+    IFS=','
+    for DNS_ITEM in $CONFIGURED_UPSTREAMS; do
+        DNS_ITEM=$(printf '%s' "$DNS_ITEM" | tr -d '[:space:]')
+        DNS_IP=${DNS_ITEM%:*}
+        case "$DNS_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
+        case "$DNS_ITEM" in *:*) DNS_PORT_VALUE=${DNS_ITEM##*:} ;; *) DNS_PORT_VALUE=53 ;; esac
+        case "$DNS_PORT_VALUE" in ''|*[!0-9]*) continue ;; esac
+        [ "$DNS_PORT_VALUE" -ge 1 ] 2>/dev/null && [ "$DNS_PORT_VALUE" -le 65535 ] 2>/dev/null || continue
+        printf '%s:%s\n' "$DNS_IP" "$DNS_PORT_VALUE" >> "$DNS_UPSTREAM_FILE"
+    done
+    IFS=$OLD_IFS
+else
+    for PROP in net.dns1 net.dns2 net.dns3 net.dns4; do
+        DNS_IP=$(getprop "$PROP" 2>/dev/null)
+        case "$DNS_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
+        printf '%s:53\n' "$DNS_IP" >> "$DNS_UPSTREAM_FILE"
+    done
+    printf '%s\n' "223.5.5.5:53" "119.29.29.29:53" >> "$DNS_UPSTREAM_FILE"
+fi
+DNS_UPSTREAMS=$(awk '!seen[$0]++ { if (out != "") out=out ","; out=out $0 } END { print out }' "$DNS_UPSTREAM_FILE")
+rm -f "$DNS_UPSTREAM_FILE"
+[ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5:53,119.29.29.29:53"
+"$DNS_BIN" -listen "127.0.0.1:$DNS_PORT" -upstream "$DNS_UPSTREAMS" -domains "$DNS_DOMAINS" -timeout 2s >> "$DNS_LOG" 2>&1 &
 DNS_PID=$!
 sleep 1
 if ! kill -0 "$DNS_PID" 2>/dev/null; then
@@ -64,4 +95,4 @@ if ! kill -0 "$DNS_PID" 2>/dev/null; then
 fi
 
 echo "$DNS_PID" > "$DNS_PIDFILE"
-log_msg "started on 127.0.0.1:$DNS_PORT (PID: $DNS_PID)"
+log_msg "started on 127.0.0.1:$DNS_PORT with upstreams $DNS_UPSTREAMS (PID: $DNS_PID)"

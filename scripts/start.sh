@@ -151,6 +151,8 @@ LISTEN_ADDR=$(jval listen_addr)
 LISTEN_PORT=$(jval listen_port)
 case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT="1080" ;; esac
 [ "$LISTEN_PORT" -ge 1 ] 2>/dev/null && [ "$LISTEN_PORT" -le 65535 ] 2>/dev/null || LISTEN_PORT="1080"
+DNS_UPSTREAMS=$(jval dns_upstreams)
+[ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5,119.29.29.29"
 # REDIRECT uses a separate IPv6 listener. Binding only to 0.0.0.0 cannot accept
 # connections redirected to ::1, while sharing one port is not portable across
 # Android kernels because IPV6_V6ONLY behavior varies.
@@ -262,7 +264,7 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
         case "$UP_TYPE" in socks|socks5|socks+ws|socks+wss|socks5+ws|socks5+wss)
             append_up_query notls true ;;
         esac
-        append_up_query resolver "223.5.5.5,1.1.1.1"
+        append_up_query resolver "$DNS_UPSTREAMS"
         if [ -n "$UP_WS_PATH" ]; then
             append_up_query path "$UP_WS_PATH"
             append_up_query host "$UP_WS_HOST"
@@ -388,8 +390,21 @@ generate_runtime_config() {
     [ -n "$_bypass_fields" ] && _bypass_json="${_bypass_json},${_bypass_fields}"
     _bypass_json="${_bypass_json}}"
 
-    # Build resolver section
-    _resolver_json="{\"name\":\"resolver-0\",\"nameservers\":[{\"addr\":\"223.5.5.5\"},{\"addr\":\"1.1.1.1\"}]}"
+    # Build resolver section from the same top-level DNS setting used by the
+    # IPv4-only filter. Invalid entries are ignored; domestic defaults remain.
+    _resolver_nameservers=""
+    OLD_IFS=$IFS
+    IFS=','
+    for _dns_item in $DNS_UPSTREAMS; do
+        _dns_item=$(printf '%s' "$_dns_item" | tr -d '[:space:]')
+        _dns_ip=${_dns_item%:*}
+        case "$_dns_ip" in ''|*:*|*[!0-9.]*) continue ;; esac
+        [ -n "$_resolver_nameservers" ] && _resolver_nameservers="${_resolver_nameservers},"
+        _resolver_nameservers="${_resolver_nameservers}{\"addr\":\"$(json_escape "$_dns_item")\"}"
+    done
+    IFS=$OLD_IFS
+    [ -n "$_resolver_nameservers" ] || _resolver_nameservers='{\"addr\":\"223.5.5.5\"},{\"addr\":\"119.29.29.29\"}'
+    _resolver_json="{\"name\":\"resolver-0\",\"nameservers\":[${_resolver_nameservers}]}"
 
     # Build services section (listener + optional multi-listen)
     _sniffing=$(jsection_val transparent sniffing)

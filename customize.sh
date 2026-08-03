@@ -37,74 +37,12 @@ ui_print "========================================"
 ui_print ""
 
 # ---- Preserve existing config before extraction ----
+# Gost itself is intentionally not preserved: every installation downloads a
+# fresh, checksum-verified binary from the source selected with the volume keys.
 PRESERVE_DIR="/tmp/gost_preserve"
 PERSIST_DIR="/data/adb/gost_proxy"
-PERSIST_BIN="$PERSIST_DIR/gost"
 rm -rf "$PRESERVE_DIR"
-mkdir -p "$PRESERVE_DIR" "$PERSIST_DIR"
-
-usable_gost_binary() {
-    [ -s "$1" ] && ! grep -q "Placeholder" "$1" 2>/dev/null
-}
-
-atomic_copy() {
-    _src="$1" _dst="$2" _dir=${2%/*}
-    _tmp="$_dir/.gost.tmp.$$"
-    mkdir -p "$_dir" || return 1
-    cp "$_src" "$_tmp" || { rm -f "$_tmp"; return 1; }
-    chmod 755 "$_tmp" 2>/dev/null
-    mv -f "$_tmp" "$_dst" || { rm -f "$_tmp"; return 1; }
-}
-
-# Preserve a usable installed binary independently of config.json. WebUI keeps
-# a persistent copy outside the module directory, so root-manager replacement
-# cannot remove the only copy during updates.
-for _binary in \
-    "$PERSIST_DIR/gost" \
-    "$OLD_MODDIR/gost/gost" \
-    /data/adb/modules/gost_proxy/gost/gost \
-    /data/adb/modules_update/gost_proxy/gost/gost \
-    /data/adb/ksu/modules/gost_proxy/gost/gost \
-    /data/adb/ksu/modules_update/gost_proxy/gost/gost \
-    /data/adb/ap/modules/gost_proxy/gost/gost \
-    /data/adb/ap/modules_update/gost_proxy/gost/gost; do
-    usable_gost_binary "$_binary" || continue
-    if atomic_copy "$_binary" "$PRESERVE_DIR/gost_bin"; then
-        if atomic_copy "$_binary" "$PERSIST_BIN"; then
-            ui_print "- Backed up existing gost binary: $_binary"
-        else
-            ui_print "- WARNING: found gost binary but persistent backup failed: $_binary"
-        fi
-        break
-    fi
-done
-
-# If the old module directory is hidden during an update, recover the binary
-# from a currently running gost process. /proc/<pid>/exe remains accessible
-# even when the original path has been replaced or moved by the root manager.
-if [ ! -s "$PRESERVE_DIR/gost_bin" ]; then
-    for _pid_dir in /proc/[0-9]*; do
-        _proc_exe=$(readlink "$_pid_dir/exe" 2>/dev/null)
-        case "$_proc_exe" in
-            */gost|*/gost\ \(deleted\)) ;;
-            *) continue ;;
-        esac
-        [ -s "$_pid_dir/exe" ] || continue
-        grep -q "Placeholder" "$_pid_dir/exe" 2>/dev/null && continue
-        if cp "$_pid_dir/exe" "$PRESERVE_DIR/gost_bin" 2>/dev/null; then
-            ui_print "- Recovered running gost binary: $_proc_exe"
-            break
-        fi
-    done
-fi
-
-# Also reuse a manually installed gost from PATH when no module copy exists.
-if [ ! -s "$PRESERVE_DIR/gost_bin" ]; then
-    _path_gost=$(command -v gost 2>/dev/null)
-    if [ -n "$_path_gost" ] && [ -s "$_path_gost" ]; then
-        cp "$_path_gost" "$PRESERVE_DIR/gost_bin" && ui_print "- Found system gost binary: $_path_gost"
-    fi
-fi
+mkdir -p "$PRESERVE_DIR"
 
 if [ -n "$OLD_MODDIR" ] && [ -f "$OLD_MODDIR/gost/config.json" ]; then
     ui_print "- Found existing config, preserving..."
@@ -165,19 +103,7 @@ done
 
 mkdir -p "$MODDIR/gost/nodes" "$MODDIR/gost/geodata" "$MODDIR/gost/tools" "$MODDIR/logs"
 
-# ---- Restore preserved binary/config ----
-# The release ZIP intentionally does not bundle gost. Prefer the device-local
-# binary and only download when no usable binary is available.
-if usable_gost_binary "$PRESERVE_DIR/gost_bin"; then
-    if atomic_copy "$PRESERVE_DIR/gost_bin" "$MODDIR/gost/gost"; then
-        # Refresh the external copy only after the module copy is safely placed.
-        atomic_copy "$PRESERVE_DIR/gost_bin" "$PERSIST_BIN" 2>/dev/null || true
-        ui_print "- Reused existing gost binary; download will be skipped."
-    else
-        abort "ERROR: Failed to restore the preserved gost binary. Persistent copy remains at $PERSIST_BIN"
-    fi
-fi
-
+# ---- Restore preserved config ----
 if [ -f "$PRESERVE_DIR/config.json" ]; then
     ui_print "- Restoring preserved config..."
     cp "$PRESERVE_DIR/config.json" "$MODDIR/gost/config.json"
@@ -219,17 +145,80 @@ if [ ! -f "$MODDIR/gost/config.json" ]; then
     fi
 fi
 
-# ---- Handle gost binary ----
-# Installation must remain offline and deterministic. Never remove an existing
-# file here: update managers may expose the live module as MODPATH. If no usable
-# binary is available, finish installing and let the user download it via WebUI.
-if [ ! -s "$MODDIR/gost/gost" ] || grep -q "Placeholder" "$MODDIR/gost/gost" 2>/dev/null; then
+# ---- Optional Gost download with volume keys ----
+GETEVENT=$(command -v getevent 2>/dev/null)
+[ -z "$GETEVENT" ] && [ -x /system/bin/getevent ] && GETEVENT=/system/bin/getevent
+
+wait_volume_key() {
+    [ -n "$GETEVENT" ] || return 2
+    while :; do
+        KEY_EVENT=$($GETEVENT -qlc 1 2>/dev/null)
+        case "$KEY_EVENT" in
+            *KEY_VOLUMEUP*|*VOLUMEUP*) return 0 ;;
+            *KEY_VOLUMEDOWN*|*VOLUMEDOWN*) return 1 ;;
+        esac
+    done
+}
+
+ui_print ""
+ui_print "Download the latest Gost during installation?"
+ui_print "  Volume Up   = download now"
+ui_print "  Volume Down = skip (download later in WebUI)"
+ui_print ""
+
+DOWNLOAD_GOST=false
+wait_volume_key
+KEY_RESULT=$?
+case "$KEY_RESULT" in
+    0) DOWNLOAD_GOST=true ;;
+    1) DOWNLOAD_GOST=false ;;
+    *)
+        DOWNLOAD_GOST=false
+        ui_print "- Volume-key input unavailable; skipping Gost download."
+        ;;
+esac
+
+# Never silently restore an old persistent binary when download was skipped.
+# The WebUI remains available and can download Gost later.
+rm -f "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
+
+if [ "$DOWNLOAD_GOST" = "true" ]; then
     ui_print ""
-    ui_print "- Gost binary is not installed; no download will run during installation."
-    ui_print "- After reboot, open WebUI and tap Download Gost."
+    ui_print "Choose Gost download source:"
+    ui_print "  Volume Up   = use https://ghfast.top accelerator"
+    ui_print "  Volume Down = download directly from GitHub"
     ui_print ""
+
+    DOWNLOAD_MODE="direct"
+    wait_volume_key
+    KEY_RESULT=$?
+    case "$KEY_RESULT" in
+        0) DOWNLOAD_MODE="accelerated" ;;
+        1) DOWNLOAD_MODE="direct" ;;
+        *) ui_print "- Volume-key input unavailable; using GitHub direct." ;;
+    esac
+
+    if [ "$DOWNLOAD_MODE" = "accelerated" ]; then
+        ui_print "- Selected accelerated download: https://ghfast.top"
+    else
+        ui_print "- Selected direct GitHub download."
+    fi
+
+    ui_print "- Downloading the latest Gost binary..."
+    if ! sh "$MODDIR/scripts/download_gost.sh" "$MODDIR/gost" "$DOWNLOAD_MODE"; then
+        abort "ERROR: Gost download failed. Check the network or reinstall and choose the other source."
+    fi
+    if [ ! -s "$MODDIR/gost/gost" ]; then
+        abort "ERROR: Downloaded Gost binary is missing."
+    fi
+    chmod 755 "$MODDIR/gost/gost"
+    GOST_VERSION_OUTPUT=$("$MODDIR/gost/gost" -V 2>&1 || true)
+    if ! printf '%s' "$GOST_VERSION_OUTPUT" | grep -qi 'gost'; then
+        abort "ERROR: Downloaded Gost binary failed the version check: $GOST_VERSION_OUTPUT"
+    fi
+    ui_print "- Fresh Gost binary downloaded and verified: $GOST_VERSION_OUTPUT"
 else
-    ui_print "- Existing gost binary is ready; no download needed."
+    ui_print "- Gost download skipped. Open WebUI after installation to download it."
 fi
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null

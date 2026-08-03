@@ -9,7 +9,11 @@ MODULE_BIN="$MODDIR/gost/gost"
 mkdir -p "$MODDIR/logs" "$PERSIST_DIR"
 
 usable_gost_binary() {
-    [ -s "$1" ] && ! grep -q "Placeholder" "$1" 2>/dev/null
+    _bin="$1"
+    [ -s "$_bin" ] || return 1
+    [ -x "$_bin" ] || chmod 755 "$_bin" 2>/dev/null || return 1
+    _version=$("$_bin" -V 2>&1 || true)
+    printf '%s' "$_version" | grep -qi 'gost'
 }
 
 atomic_copy() {

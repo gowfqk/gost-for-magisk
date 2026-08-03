@@ -15,20 +15,27 @@ import (
 )
 
 const (
-	dnsHeaderLen = 12
-	typeAAAA     = 28
+	dnsHeaderLen   = 12
+	typeAAAA       = 28
+	udpWorkerCount = 128
+	udpQueueSize   = 1024
 )
 
+type udpRequest struct {
+	query []byte
+	addr  net.Addr
+}
+
 type server struct {
-	listen   string
-	upstream string
-	timeout  time.Duration
-	domains  []string
+	listen    string
+	upstreams []string
+	timeout   time.Duration
+	domains   []string
 }
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:1053", "UDP/TCP listen address")
-	upstream := flag.String("upstream", "223.5.5.5:53", "upstream DNS server")
+	upstream := flag.String("upstream", "223.5.5.5:53,119.29.29.29:53", "comma-separated upstream DNS servers")
 	domainFile := flag.String("domains", "", "domain suffix file")
 	timeout := flag.Duration("timeout", 5*time.Second, "upstream timeout")
 	flag.Parse()
@@ -41,7 +48,12 @@ func main() {
 		log.Fatal("no IPv4-only domains configured")
 	}
 
-	s := &server{listen: *listen, upstream: *upstream, timeout: *timeout, domains: domains}
+	upstreams := parseUpstreams(*upstream)
+	if len(upstreams) == 0 {
+		log.Fatal("no upstream DNS servers configured")
+	}
+
+	s := &server{listen: *listen, upstreams: upstreams, timeout: *timeout, domains: domains}
 	udpConn, err := net.ListenPacket("udp4", s.listen)
 	if err != nil {
 		log.Fatalf("listen UDP %s: %v", s.listen, err)
@@ -51,13 +63,32 @@ func main() {
 		udpConn.Close()
 		log.Fatalf("listen TCP %s: %v", s.listen, err)
 	}
-	log.Printf("IPv4-only DNS filter listening on %s, upstream %s, domains %d", s.listen, s.upstream, len(s.domains))
+	log.Printf("IPv4-only DNS filter listening on %s, upstreams %s, domains %d", s.listen, strings.Join(s.upstreams, ","), len(s.domains))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); s.serveUDP(udpConn) }()
 	go func() { defer wg.Done(); s.serveTCP(tcpLn) }()
 	wg.Wait()
+}
+
+func parseUpstreams(value string) []string {
+	seen := make(map[string]bool)
+	var upstreams []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(item); err != nil {
+			item = net.JoinHostPort(item, "53")
+		}
+		if !seen[item] {
+			seen[item] = true
+			upstreams = append(upstreams, item)
+		}
+	}
+	return upstreams
 }
 
 func loadDomains(path string) ([]string, error) {
@@ -88,6 +119,11 @@ func loadDomains(path string) ([]string, error) {
 
 func (s *server) serveUDP(conn net.PacketConn) {
 	defer conn.Close()
+	requests := make(chan udpRequest, udpQueueSize)
+	for i := 0; i < udpWorkerCount; i++ {
+		go s.udpWorker(conn, requests)
+	}
+
 	buf := make([]byte, 65535)
 	for {
 		n, addr, err := conn.ReadFrom(buf)
@@ -95,17 +131,29 @@ func (s *server) serveUDP(conn net.PacketConn) {
 			log.Printf("UDP read: %v", err)
 			return
 		}
-		query := append([]byte(nil), buf[:n]...)
-		go func() {
-			response, err := s.answer(query, false)
-			if err != nil {
-				log.Printf("UDP query: %v", err)
-				response = serverFailure(query)
-			}
+		request := udpRequest{query: append([]byte(nil), buf[:n]...), addr: addr}
+		select {
+		case requests <- request:
+		default:
+			response := serverFailure(request.query)
 			if len(response) > 0 {
-				_, _ = conn.WriteTo(response, addr)
+				_, _ = conn.WriteTo(response, request.addr)
 			}
-		}()
+			log.Printf("UDP query queue full; request rejected")
+		}
+	}
+}
+
+func (s *server) udpWorker(conn net.PacketConn, requests <-chan udpRequest) {
+	for request := range requests {
+		response, err := s.answer(request.query, false)
+		if err != nil {
+			log.Printf("UDP query: %v", err)
+			response = serverFailure(request.query)
+		}
+		if len(response) > 0 {
+			_, _ = conn.WriteTo(response, request.addr)
+		}
 	}
 }
 
@@ -230,33 +278,65 @@ func serverFailure(query []byte) []byte {
 }
 
 func (s *server) forwardUDP(query []byte) ([]byte, error) {
-	conn, err := net.DialTimeout("udp4", s.upstream, s.timeout)
-	if err != nil {
-		return nil, err
+	deadline := time.Now().Add(s.timeout)
+	var lastErr error
+	for index, upstream := range s.upstreams {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		serversLeft := len(s.upstreams) - index
+		attemptTimeout := remaining / time.Duration(serversLeft)
+		if attemptTimeout < 250*time.Millisecond {
+			attemptTimeout = remaining
+		}
+
+		conn, err := net.DialTimeout("udp4", upstream, attemptTimeout)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = conn.SetDeadline(time.Now().Add(attemptTimeout))
+		if _, err = conn.Write(query); err == nil {
+			buf := make([]byte, 65535)
+			var n int
+			n, err = conn.Read(buf)
+			if err == nil {
+				conn.Close()
+				return append([]byte(nil), buf[:n]...), nil
+			}
+		}
+		conn.Close()
+		lastErr = err
 	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(s.timeout))
-	if _, err := conn.Write(query); err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = errors.New("upstream timeout")
 	}
-	buf := make([]byte, 65535)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte(nil), buf[:n]...), nil
+	return nil, fmt.Errorf("all UDP upstreams failed: %w", lastErr)
 }
 
 func (s *server) forwardTCP(query []byte) ([]byte, error) {
-	conn, err := net.DialTimeout("tcp4", s.upstream, s.timeout)
+	if len(query) > 65535 {
+		return nil, fmt.Errorf("query too large: %d", len(query))
+	}
+	var lastErr error
+	for _, upstream := range s.upstreams {
+		response, err := s.forwardTCPTo(query, upstream)
+		if err == nil {
+			return response, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("all TCP upstreams failed: %w", lastErr)
+}
+
+func (s *server) forwardTCPTo(query []byte, upstream string) ([]byte, error) {
+	conn, err := net.DialTimeout("tcp4", upstream, s.timeout)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(s.timeout))
-	if len(query) > 65535 {
-		return nil, fmt.Errorf("query too large: %d", len(query))
-	}
 	var length [2]byte
 	binary.BigEndian.PutUint16(length[:], uint16(len(query)))
 	if _, err := conn.Write(append(length[:], query...)); err != nil {

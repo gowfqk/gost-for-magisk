@@ -272,14 +272,43 @@ else
     log_msg "WARNING: IPv6 nat REDIRECT unavailable; IPv4 TCP proxy remains enabled and IPv6 stays direct"
 
     # Without IPv6 REDIRECT, dual-stack Google services would use AAAA records
-    # and bypass the IPv4 transparent proxy. Start a local DNS filter and only
-    # intercept non-root port 53 traffic. Its root-owned upstream query bypasses
-    # this chain, so it cannot loop back into itself.
+    # and bypass the IPv4 transparent proxy. Start a local DNS filter and
+    # intercept port 53 traffic, including root-owned queries delegated to netd.
     DNS_FILTER_ENABLED=false
     if sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" start "$DNS_PORT"; then
-        if "$IPT" -t nat -N "$DNS_CHAIN" 2>/dev/null && \
-           "$IPT" -t nat -A "$DNS_CHAIN" -m owner --uid-owner 0 -j RETURN 2>/dev/null; then
-            if [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
+        if "$IPT" -t nat -N "$DNS_CHAIN" 2>/dev/null; then
+            # Android commonly delegates app lookups to netd, whose external DNS
+            # packets are root-owned. Excluding UID 0 would therefore bypass the
+            # AAAA filter entirely. Exclude only the filter's possible upstream
+            # resolver destinations so its own queries cannot loop.
+            DNS_EXCLUDES_READY=true
+            DNS_EXCLUDE_IPS=""
+            CONFIGURED_DNS=$(jval dns_upstreams)
+            if [ -n "$CONFIGURED_DNS" ]; then
+                OLD_IFS=$IFS
+                IFS=','
+                for DNS_ITEM in $CONFIGURED_DNS; do
+                    DNS_ITEM=$(printf '%s' "$DNS_ITEM" | tr -d '[:space:]')
+                    DNS_PROP_IP=${DNS_ITEM%:*}
+                    case "$DNS_PROP_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
+                    case " $DNS_EXCLUDE_IPS " in *" $DNS_PROP_IP "*) ;; *) DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS $DNS_PROP_IP" ;; esac
+                done
+                IFS=$OLD_IFS
+            else
+                for DNS_PROP in net.dns1 net.dns2 net.dns3 net.dns4; do
+                    DNS_PROP_IP=$(getprop "$DNS_PROP" 2>/dev/null)
+                    case "$DNS_PROP_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
+                    case " $DNS_EXCLUDE_IPS " in *" $DNS_PROP_IP "*) ;; *) DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS $DNS_PROP_IP" ;; esac
+                done
+                DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS 223.5.5.5 119.29.29.29"
+            fi
+            for DNS_UPSTREAM_IP in $DNS_EXCLUDE_IPS; do
+                "$IPT" -t nat -A "$DNS_CHAIN" -d "$DNS_UPSTREAM_IP/32" -j RETURN 2>/dev/null || {
+                    DNS_EXCLUDES_READY=false
+                    break
+                }
+            done
+            if [ "$DNS_EXCLUDES_READY" = "true" ] && [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
                 OLD_IFS=$IFS
                 IFS=','
                 for UID_VALUE in $DIRECT_UIDS; do
@@ -288,8 +317,11 @@ else
                 done
                 IFS=$OLD_IFS
             fi
-            "$IPT" -t nat -A "$DNS_CHAIN" -d 127.0.0.0/8 -j RETURN 2>/dev/null
-            if "$IPT" -t nat -A "$DNS_CHAIN" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null && \
+            if [ "$DNS_EXCLUDES_READY" = "true" ]; then
+                "$IPT" -t nat -A "$DNS_CHAIN" -d 127.0.0.0/8 -j RETURN 2>/dev/null || DNS_EXCLUDES_READY=false
+            fi
+            if [ "$DNS_EXCLUDES_READY" = "true" ] && \
+               "$IPT" -t nat -A "$DNS_CHAIN" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null && \
                "$IPT" -t nat -A "$DNS_CHAIN" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT" 2>/dev/null && \
                "$IPT" -t nat -A OUTPUT -p udp --dport 53 -j "$DNS_CHAIN" 2>/dev/null && \
                "$IPT" -t nat -A OUTPUT -p tcp --dport 53 -j "$DNS_CHAIN" 2>/dev/null; then

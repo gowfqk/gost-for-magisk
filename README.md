@@ -22,10 +22,12 @@
 1. 从 [Releases](https://github.com/gowfqk/gost-for-magisk/releases) 下载最新的 `gost-proxy-v*.zip`
 2. 在 Magisk / KernelSU / APatch 管理器中选择「从存储安装」
 3. 选择下载的 ZIP 并完成安装
-4. 首次安装建议重启手机，让模块服务和透明代理规则正常初始化
-5. 重启后打开 `http://127.0.0.1:8080`，点击「下载 Gost」手动安装二进制
+4. 安装时第一次按音量键选择是否立即下载 Gost：音量上下载，音量下跳过
+5. 若选择下载，再按一次音量键选择来源：音量上使用 `https://ghfast.top` 加速，音量下直连 GitHub
+6. 选择下载时，安装器会下载并校验最新版 Gost；选择跳过时可稍后在 WebUI 下载
+7. 安装完成后建议重启手机，让模块服务和透明代理规则正常初始化
 
-更新已安装模块时，安装脚本会保留配置、节点、GeoData 缓存和已有 Gost 二进制，并自动热重启 WebUI。更新后的管理界面无需重启手机即可生效，正在运行的 Gost 代理不会被中断；若热重启失败，重启手机后会按正常流程启动。
+更新已安装模块时，安装脚本会保留配置、节点和 GeoData 缓存，但不会复用旧 Gost 二进制。用户可选择立即重新下载，或暂时跳过并稍后在 WebUI 下载。安装完成后会自动热重启 WebUI；若热重启失败，重启手机后会按正常流程启动。
 
 ### 方式二：手动放置二进制
 
@@ -59,13 +61,18 @@ sh /data/adb/modules/gost_proxy/scripts/download_gost.sh
 
 ## 手动下载脚本
 
-WebUI 的「下载 Gost」按钮会调用 `scripts/download_gost.sh`；安装模块时不会执行该脚本。该脚本提供：
+安装器和 WebUI 的「下载 Gost」按钮都会调用 `scripts/download_gost.sh`。安装器通过音量键明确选择下载源；命令行默认直连，也可传入 `accelerated` 使用 `https://ghfast.top`：
+
+```bash
+sh /data/adb/modules/gost_proxy/scripts/download_gost.sh /data/adb/modules/gost_proxy/gost accelerated
+```
+
+该脚本提供：
 
 - **架构自动检测** - 通过 `getprop` (Android) 或 `uname` (Linux) 检测设备架构
-- **国内网络检测** - 通过 GitHub API 连通性测试 + IP 地理位置双重检测
-- **加速镜像** - 检测到国内网络时自动使用 GitHub 加速镜像（支持多个镜像源自动切换）
-- **版本自动获取** - 从 GitHub API 获取最新 release 版本
-- **完整性验证** - 下载后自动解压、安装、验证二进制
+- **下载源可选** - GitHub 直连或 `https://ghfast.top` 加速
+- **版本自动获取** - 从所选来源获取 GitHub 最新 release 版本
+- **完整性验证** - 使用 GitHub release 官方 SHA256 摘要验证后再安装
 
 ### 架构映射
 
