@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +21,7 @@ const (
 	typeAAAA       = 28
 	udpWorkerCount = 128
 	udpQueueSize   = 1024
+	tcpConnLimit   = 128
 )
 
 type udpRequest struct {
@@ -27,10 +30,12 @@ type udpRequest struct {
 }
 
 type server struct {
-	listen    string
-	upstreams []string
-	timeout   time.Duration
-	domains   []string
+	listen        string
+	upstreams     []string
+	timeout       time.Duration
+	domains       []string
+	tcpSlots      chan struct{}
+	filterAllAAAA bool
 }
 
 func main() {
@@ -38,13 +43,21 @@ func main() {
 	upstream := flag.String("upstream", "223.5.5.5:53,119.29.29.29:53", "comma-separated upstream DNS servers")
 	domainFile := flag.String("domains", "", "domain suffix file")
 	timeout := flag.Duration("timeout", 5*time.Second, "upstream timeout")
+	filterAllAAAA := flag.Bool("filter-all-aaaa", false, "return NODATA for every AAAA query")
+	validateConfig := flag.String("validate-config", "", "validate a module JSON config file and exit")
 	flag.Parse()
+	if *validateConfig != "" {
+		if err := validateModuleConfig(*validateConfig); err != nil {
+			log.Fatalf("invalid config: %v", err)
+		}
+		return
+	}
 
 	domains, err := loadDomains(*domainFile)
-	if err != nil {
+	if err != nil && !*filterAllAAAA {
 		log.Fatalf("load domains: %v", err)
 	}
-	if len(domains) == 0 {
+	if len(domains) == 0 && !*filterAllAAAA {
 		log.Fatal("no IPv4-only domains configured")
 	}
 
@@ -53,7 +66,7 @@ func main() {
 		log.Fatal("no upstream DNS servers configured")
 	}
 
-	s := &server{listen: *listen, upstreams: upstreams, timeout: *timeout, domains: domains}
+	s := &server{listen: *listen, upstreams: upstreams, timeout: *timeout, domains: domains, tcpSlots: make(chan struct{}, tcpConnLimit), filterAllAAAA: *filterAllAAAA}
 	udpConn, err := net.ListenPacket("udp4", s.listen)
 	if err != nil {
 		log.Fatalf("listen UDP %s: %v", s.listen, err)
@@ -63,13 +76,90 @@ func main() {
 		udpConn.Close()
 		log.Fatalf("listen TCP %s: %v", s.listen, err)
 	}
-	log.Printf("IPv4-only DNS filter listening on %s, upstreams %s, domains %d", s.listen, strings.Join(s.upstreams, ","), len(s.domains))
+	log.Printf("IPv4-only DNS filter listening on %s, upstreams %s, domains %d, filter_all_aaaa=%t", s.listen, strings.Join(s.upstreams, ","), len(s.domains), s.filterAllAAAA)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); s.serveUDP(udpConn) }()
 	go func() { defer wg.Done(); s.serveTCP(tcpLn) }()
 	wg.Wait()
+}
+
+type moduleConfig struct {
+	ProxyType   string `json:"proxy_type"`
+	ListenPort  int    `json:"listen_port"`
+	WebUIPort   int    `json:"webui_port"`
+	Transparent *struct {
+		IPv6Enabled *bool `json:"ipv6_enabled"`
+	} `json:"transparent"`
+	Upstream *struct {
+		Enabled bool   `json:"enabled"`
+		Addr    string `json:"addr"`
+		Port    int    `json:"port"`
+		Route   string `json:"route"`
+	} `json:"upstream"`
+	Routing *struct {
+		DirectUIDs []int `json:"direct_uids"`
+	} `json:"routing"`
+	Advanced *struct {
+		MultiListen []int `json:"multi_listen"`
+	} `json:"advanced"`
+}
+
+func validateModuleConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 || len(data) > 65536 {
+		return fmt.Errorf("config size must be between 1 and 65536 bytes")
+	}
+	var cfg moduleConfig
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&cfg); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	if cfg.ProxyType != "redirect" && cfg.ProxyType != "socks5" {
+		return errors.New("proxy_type must be redirect or socks5")
+	}
+	if cfg.ListenPort < 1 || cfg.ListenPort > 65535 {
+		return errors.New("listen_port is out of range")
+	}
+	if cfg.WebUIPort != 0 && (cfg.WebUIPort < 1 || cfg.WebUIPort > 65535) {
+		return errors.New("webui_port is out of range")
+	}
+	if cfg.Upstream != nil {
+		if cfg.Upstream.Enabled && (cfg.Upstream.Addr == "" || cfg.Upstream.Port < 1 || cfg.Upstream.Port > 65535) {
+			return errors.New("enabled upstream requires an address and valid port")
+		}
+		switch cfg.Upstream.Route {
+		case "", "ws", "wss":
+		default:
+			return errors.New("upstream route must be empty, ws, or wss")
+		}
+	}
+	if cfg.Advanced != nil {
+		for _, port := range cfg.Advanced.MultiListen {
+			if port < 1 || port > 65535 {
+				return errors.New("advanced multi_listen contains an invalid port")
+			}
+		}
+	}
+	if cfg.Routing != nil {
+		for _, uid := range cfg.Routing.DirectUIDs {
+			if uid < 0 {
+				return errors.New("routing direct_uids contains a negative UID")
+			}
+		}
+	}
+	return nil
 }
 
 func parseUpstreams(value string) []string {
@@ -165,7 +255,16 @@ func (s *server) serveTCP(ln net.Listener) {
 			log.Printf("TCP accept: %v", err)
 			return
 		}
-		go s.handleTCP(conn)
+		select {
+		case s.tcpSlots <- struct{}{}:
+			go func() {
+				defer func() { <-s.tcpSlots }()
+				s.handleTCP(conn)
+			}()
+		default:
+			_ = conn.Close()
+			log.Printf("TCP connection limit reached; connection rejected")
+		}
 	}
 }
 
@@ -201,13 +300,17 @@ func (s *server) answer(query []byte, tcp bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if qtype == typeAAAA && s.filtered(name) {
+	if qtype == typeAAAA && s.shouldFilterAAAA(name) {
 		return noData(query, questionEnd), nil
 	}
 	if tcp {
 		return s.forwardTCP(query)
 	}
 	return s.forwardUDP(query)
+}
+
+func (s *server) shouldFilterAAAA(name string) bool {
+	return s.filterAllAAAA || s.filtered(name)
 }
 
 func (s *server) filtered(name string) bool {

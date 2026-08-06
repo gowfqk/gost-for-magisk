@@ -20,6 +20,7 @@ ACTIVE_FILE="$MODDIR/gost/active"
 LOG_PATH="$MODDIR/logs/gost.log"
 PIDFILE="/tmp/gost.pid"
 PERSIST_BIN="/data/adb/gost_proxy/gost"
+CONFIG_VALIDATOR="${GOST_CONFIG_VALIDATOR:-$MODDIR/dns/bin/dns-filter-arm64}"
 
 mkdir -p "$NODES_DIR"
 
@@ -321,14 +322,14 @@ normalize_config() {
 valid_config() {
     _data="$1"
     [ -n "$_data" ] && [ ${#_data} -le 65536 ] || return 1
-    printf '%s' "$_data" | grep -q '^[[:space:]]*{' || return 1
-    printf '%s' "$_data" | grep -q '}[[:space:]]*$' || return 1
-    _proxy_type=$(printf '%s' "$_data" | grep -o '"proxy_type"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:[[:space:]]*"//; s/"$//')
-    case "$_proxy_type" in redirect|socks5) ;; *) return 1 ;; esac
-    _listen_port=$(printf '%s' "$_data" | grep -o '"listen_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
-    _webui_port=$(printf '%s' "$_data" | grep -o '"webui_port"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$')
-    [ -n "$_listen_port" ] && [ "$_listen_port" -ge 1 ] 2>/dev/null && [ "$_listen_port" -le 65535 ] 2>/dev/null || return 1
-    [ -z "$_webui_port" ] || { [ "$_webui_port" -ge 1 ] 2>/dev/null && [ "$_webui_port" -le 65535 ] 2>/dev/null; } || return 1
+    [ -x "$CONFIG_VALIDATOR" ] || return 1
+    _candidate="$MODDIR/gost/.config.validate.$$"
+    umask 077
+    printf '%s' "$_data" > "$_candidate" || return 1
+    "$CONFIG_VALIDATOR" -validate-config "$_candidate" >/dev/null 2>&1
+    _rc=$?
+    rm -f "$_candidate"
+    return "$_rc"
 }
 
 write_config() {
@@ -361,6 +362,7 @@ sync_active_node() {
     _active=$(get_active_node)
     if valid_node_name "$_active" && [ -f "$NODES_DIR/${_active}.json" ]; then
         cp "$CONFIG" "$NODES_DIR/${_active}.json"
+        chmod 600 "$NODES_DIR/${_active}.json" 2>/dev/null
     fi
     # Routing is global policy. Propagate it to every saved node so imports and
     # future switches cannot resurrect stale or empty bypass lists.
@@ -377,7 +379,9 @@ proxy_is_running() {
     [ -f "$PIDFILE" ] || return 1
     _pid=$(cat "$PIDFILE" 2>/dev/null)
     case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
-    kill -0 "$_pid" 2>/dev/null
+    kill -0 "$_pid" 2>/dev/null || return 1
+    _cmd=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
+    printf '%s' "$_cmd" | grep -Fq "$MODDIR/gost/gost"
 }
 
 # Apply changed listener mode, upstream and interception rules immediately, but
@@ -387,9 +391,7 @@ RUNTIME_ERROR_FILE="/tmp/gost-runtime-error.$$"
 apply_runtime_if_running() {
     rm -f "$RUNTIME_ERROR_FILE"
     proxy_is_running || return 0
-    sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
-    sleep 1
-    sh "$MODDIR/scripts/start.sh" "$MODDIR" >"$RUNTIME_ERROR_FILE" 2>&1
+    sh "$MODDIR/scripts/restart.sh" "$MODDIR" >"$RUNTIME_ERROR_FILE" 2>&1
     if proxy_is_running; then
         rm -f "$RUNTIME_ERROR_FILE"
         return 0
@@ -517,10 +519,12 @@ case "$ENDPOINT" in
             elif [ "$QUERY_ACTIVATE" = "false" ]; then
                 umask 077
                 printf '%s' "$NODE_CONFIG" > "$NODES_DIR/${NODE_NAME}.json"
+                chmod 600 "$NODES_DIR/${NODE_NAME}.json" 2>/dev/null
                 json_header
                 printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
             elif write_config "$NODE_CONFIG"; then
                 cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json" && echo "$NODE_NAME" > "$ACTIVE_FILE"
+                chmod 600 "$NODES_DIR/${NODE_NAME}.json" "$ACTIVE_FILE" 2>/dev/null
                 json_header
                 printf '{"success":true,"message":"Node imported","name":"%s"}' "$NODE_NAME"
             else
@@ -547,6 +551,7 @@ case "$ENDPOINT" in
         else
             cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json"
             echo "$NODE_NAME" > "$ACTIVE_FILE"
+            chmod 600 "$NODES_DIR/${NODE_NAME}.json" "$ACTIVE_FILE" 2>/dev/null
             json_header
             printf '{"success":true,"message":"Node saved","name":"%s"}' "$NODE_NAME"
         fi
@@ -572,6 +577,7 @@ case "$ENDPOINT" in
             fi
             if mv -f "$_tmp" "$NODES_DIR/${NODE_NAME}.json"; then
                 [ "$NODE_NAME" = "$(get_active_node)" ] && cp "$NODES_DIR/${NODE_NAME}.json" "$CONFIG"
+                chmod 600 "$NODES_DIR/${NODE_NAME}.json" "$CONFIG" 2>/dev/null
                 json_header
                 printf '{"success":true,"name":"%s","display_name":"%s"}' "$NODE_NAME" "$_escaped"
             else
@@ -608,6 +614,7 @@ case "$ENDPOINT" in
             # Keep every saved node aligned with the device-wide routing policy.
             cp "$CONFIG" "$NODES_DIR/${NODE_NAME}.json"
             echo "$NODE_NAME" > "$ACTIVE_FILE"
+            chmod 600 "$CONFIG" "$NODES_DIR/${NODE_NAME}.json" "$ACTIVE_FILE" 2>/dev/null
             if [ "$WAS_RUNNING" = "true" ]; then
                 apply_runtime_if_running
                 APPLY_RC=$?
@@ -677,11 +684,9 @@ case "$ENDPOINT" in
         ;;
 
     restart)
-        sh "$MODDIR/scripts/stop.sh" "$MODDIR" >/dev/null 2>&1
-        sleep 1
         ACTION_CAPTURE="/tmp/gost-start-output.$$"
         rm -f "$ACTION_CAPTURE"
-        sh "$MODDIR/scripts/start.sh" "$MODDIR" >"$ACTION_CAPTURE" 2>&1
+        sh "$MODDIR/scripts/restart.sh" "$MODDIR" >"$ACTION_CAPTURE" 2>&1
         sleep 1
         json_header
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -799,7 +804,7 @@ case "$ENDPOINT" in
                 fi
                 UP_SCHEME="$UP_TYPE"
                 case "$UP_TYPE" in
-                    *+ws*|*+wss*) ;;
+                    *+ws|*+wss) ;;
                     *)
                         UP_WS=$(jsection_val upstream ws_path)
                         [ -n "$UP_WS" ] && UP_SCHEME="${UP_SCHEME}+ws"

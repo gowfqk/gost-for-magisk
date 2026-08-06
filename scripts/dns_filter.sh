@@ -3,6 +3,7 @@
 MODDIR=${1:-/data/adb/modules/gost_proxy}
 ACTION=${2:-start}
 DNS_PORT=${3:-1053}
+FILTER_MODE=${4:-domains}
 DNS_DIR="$MODDIR/dns"
 DNS_BIN_DIR="$DNS_DIR/bin"
 DNS_DOMAINS="$DNS_DIR/ipv4-only-domains.txt"
@@ -87,7 +88,12 @@ fi
 DNS_UPSTREAMS=$(awk '!seen[$0]++ { if (out != "") out=out ","; out=out $0 } END { print out }' "$DNS_UPSTREAM_FILE")
 rm -f "$DNS_UPSTREAM_FILE"
 [ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5:53,119.29.29.29:53"
-DNS_CMD="$DNS_BIN -listen 127.0.0.1:$DNS_PORT -upstream $DNS_UPSTREAMS -domains $DNS_DOMAINS -timeout 2s"
+case "$FILTER_MODE" in
+    all) FILTER_ARG="-filter-all-aaaa" ;;
+    domains) FILTER_ARG="" ;;
+    *) log_msg "ERROR: unsupported DNS filter mode: $FILTER_MODE"; exit 1 ;;
+esac
+DNS_CMD="$DNS_BIN -listen 127.0.0.1:$DNS_PORT -upstream $DNS_UPSTREAMS -domains $DNS_DOMAINS -timeout 2s $FILTER_ARG"
 if ! command -v su >/dev/null 2>&1; then
     log_msg "ERROR: su is required to run the DNS filter without a redirect loop"
     exit 1
@@ -101,4 +107,4 @@ if ! kill -0 "$DNS_PID" 2>/dev/null; then
 fi
 
 echo "$DNS_PID" > "$DNS_PIDFILE"
-log_msg "started on 127.0.0.1:$DNS_PORT with upstreams $DNS_UPSTREAMS (PID: $DNS_PID)"
+log_msg "started on 127.0.0.1:$DNS_PORT with upstreams $DNS_UPSTREAMS mode=$FILTER_MODE (PID: $DNS_PID)"

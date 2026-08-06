@@ -9,7 +9,7 @@
 - 📦 **WebUI 下载二进制** - 模块安装过程不联网；安装后由用户在 WebUI 手动下载对应架构的 gost，国内网络自动尝试加速镜像
 - 🔗 **链接导入** - 一个输入框同时支持单条和批量代理链接导入（每行一条），节点名称自动读取链接备注
 - 🔀 **双本地模式** - REDIRECT 使用 gost `red` 和 iptables 自动接管本机 TCP；SOCKS5 开放普通代理端口且不修改系统流量规则；上游仍支持 HTTP / SOCKS5 / Shadowsocks / TLS / WebSocket
-- 🧭 **IPv4-only DNS 兼容** - 内核缺少 IPv6 NAT 时自动过滤 Google 相关域名的 AAAA 应答，防止双栈流量绕过 IPv4 透明代理
+- 🧭 **IPv6 开关 / IPv4-only 模式** - 默认关闭 IPv6，过滤全部 AAAA 应答并阻止公网 IPv6 TCP，避免网站优先解析 IPv6 后访问失败；也可在 WebUI 开启完整双栈代理
 - 🇨🇳 **GeoData 自动分流** - 可下载 GeoSite/GeoIP 数据，将中国域名及 CIDR 设为直连
 - ♻️ **免重启更新 WebUI** - 更新模块后自动从新模块目录热重启 WebUI，不影响正在运行的 gost 代理
 - 📱 **ARM64 精简包** - 仅支持现代 Android 设备常用的 arm64-v8a，显著减小安装包体积
@@ -27,7 +27,7 @@
 6. 选择下载时，安装器会下载并校验最新版 Gost；选择跳过时可稍后在 WebUI 下载
 7. 安装完成后建议重启手机，让模块服务和透明代理规则正常初始化
 
-更新已安装模块时，安装脚本会保留配置、节点和 GeoData 缓存，但不会复用旧 Gost 二进制。用户可选择立即重新下载，或暂时跳过并稍后在 WebUI 下载。安装完成后会自动热重启 WebUI；若热重启失败，重启手机后会按正常流程启动。
+更新已安装模块时，安装脚本会保留配置、节点、GeoData 缓存和可用的旧 Gost 二进制。用户可选择立即重新下载，或保留旧版本并稍后在 WebUI 下载。安装完成后会自动热重启 WebUI；若热重启失败，重启手机后会按正常流程启动。
 
 ### 方式二：手动放置二进制
 
@@ -88,12 +88,26 @@ sh /data/adb/modules/gost_proxy/scripts/download_gost.sh /data/adb/modules/gost_
 
 本地代理模式可在 WebUI 中选择：
 
-- **REDIRECT**（默认，兼容旧配置）：使用 `red://` 监听器，并自动创建 `iptables`/`ip6tables` OUTPUT 规则接管本机 IPv4 与 IPv6 TCP。局域网、回环地址、WebUI 端口、透明监听端口以及 root UID 流量会被排除，防止 gost 上游连接被重复代理。
+- **REDIRECT**（默认，兼容旧配置）：使用 `red://` 监听器，并自动创建 `iptables`/`ip6tables` OUTPUT 规则接管本机 IPv4 与 IPv6 TCP。回环地址、WebUI 端口、透明监听端口以及 root UID 流量始终排除；`transparent.exclude_lan=true` 时额外排除局域网地址。Gost 以 root UID 运行，因此其上游连接不会被重复代理。
 - **SOCKS5**：使用 `socks5://` 普通监听器，可选用户名/密码认证。该模式不会自动接管系统流量，也不会安装透明代理、QUIC 或 DNS 重定向规则；应用需手动配置模块的监听地址和端口。由 REDIRECT 切换到 SOCKS5 并重启后，会主动清理旧透明规则。
 
-部分 Android 内核虽提供 `ip6tables`，但缺少 IPv6 `nat` 表。仅在 REDIRECT 模式下，模块检测到这种情况后会保留 IPv4 TCP 代理，并自动启动本地 DNS 过滤器：Google、YouTube 等目标域名的 A 查询正常转发，AAAA 查询返回空答案，从而让应用改用可被代理的 IPv4。过滤列表位于 `dns/ipv4-only-domains.txt`。支持 IPv6 NAT 的设备不会启用此兼容模式。
+WebUI 的「启用 IPv6」开关默认为关闭。关闭时模块进入 IPv4-only 模式：所有传统 DNS AAAA 查询返回空答案，并拒绝非本地公网 IPv6 TCP，避免缓存的 AAAA 或 IPv6 字面地址继续造成访问卡顿。开启后，如果内核支持 IPv6 `nat`，IPv6 TCP 会由独立 REDIRECT 监听器代理；若内核缺少 IPv6 `nat`，则只对 `dns/ipv4-only-domains.txt` 中的兼容域名过滤 AAAA，使 Google、YouTube 等流量回退 IPv4。
 
-注意：REDIRECT 当前只透明代理 TCP；普通 UDP 不会被接管。兼容模式只额外接管传统 DNS 的 UDP/TCP 53。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，REDIRECT 模式会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。Android 私人 DNS（DoT）或应用内安全 DNS（DoH）不经过 53 端口，启用时可能绕过本地 DNS 过滤；遇到此情况请关闭私人 DNS和 Chrome 安全 DNS。SOCKS5 模式不应用这些全局规则。由于 gost 以 root 运行，为避免 REDIRECT 代理回环，Android 的 root/system UID 流量仍会直连。
+注意：REDIRECT 当前只透明代理 TCP；普通 UDP 不会被接管。IPv4-only 和兼容模式只额外接管传统 DNS 的 UDP/TCP 53。为避免 Chrome/Google 通过 UDP/443 的 QUIC 绕过 TCP 代理，REDIRECT 模式会拒绝非 root 应用的 QUIC，使其立即回退到已代理的 HTTPS/TCP。Android 私人 DNS（DoT）或应用内安全 DNS（DoH）不经过 53 端口，启用时可能绕过本地 DNS 过滤；遇到此情况请关闭私人 DNS和 Chrome 安全 DNS。SOCKS5 模式不应用这些全局规则。Gost 自身以 root UID 运行并始终直连；需要让其他 UID（例如 system UID 1000）直连时，请加入 `routing.direct_uids`。
+
+## 安全与健壮性
+
+- WebUI 节点列表使用 DOM API 和事件监听器，不再把节点名称拼入内联 JavaScript。
+- 配置保存前由内置 ARM64 helper 执行严格 JSON 及关键字段校验；配置、节点和运行时凭据文件使用 `0600`。
+- Gost 启停操作使用全局锁并验证 PID 归属，避免并发启动、PID 复用和残留进程。
+- 加速镜像仅传输 Gost 归档，校验值始终从 GitHub 官方来源获取；验证失败会恢复旧二进制。
+- iptables 规则先完整构建再挂接 OUTPUT，关键失败会清理回滚。
+
+DNS helper 可通过以下命令复现构建：
+
+```bash
+scripts/build_dns_filter.sh
+```
 
 ## 卸载
 

@@ -7,6 +7,8 @@ PERSIST_BIN="$PERSIST_DIR/gost"
 MODULE_BIN="$MODDIR/gost/gost"
 
 mkdir -p "$MODDIR/logs" "$PERSIST_DIR"
+chmod 700 "$MODDIR/gost" "$MODDIR/gost/nodes" 2>/dev/null
+chmod 600 "$MODDIR/gost/config.json" "$MODDIR/gost/active" 2>/dev/null
 
 usable_gost_binary() {
     _bin="$1"

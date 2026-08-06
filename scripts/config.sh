@@ -20,6 +20,16 @@ NODES_DIR="$MODDIR/gost/nodes"
 ACTIVE_FILE="$MODDIR/gost/active"
 
 mkdir -p "$NODES_DIR"
+chmod 700 "$NODES_DIR" 2>/dev/null
+
+valid_node_name() {
+    _name="$1"
+    [ -n "$_name" ] && [ ${#_name} -le 64 ] || return 1
+    case "$_name" in
+        *[!A-Za-z0-9._-]*|.*|*..*) return 1 ;;
+    esac
+    return 0
+}
 
 # ---- Config read/write helpers ----
 config_read() {
@@ -36,10 +46,13 @@ config_write() {
         echo "ERROR: empty config data"
         return 1
     fi
-    echo "$_json" > "$CONFIG"
-    if [ $? -eq 0 ]; then
+    _tmp="$CONFIG.tmp.$$"
+    umask 077
+    if printf '%s\n' "$_json" > "$_tmp" && mv -f "$_tmp" "$CONFIG"; then
+        chmod 600 "$CONFIG" 2>/dev/null
         echo "Config saved successfully"
     else
+        rm -f "$_tmp"
         echo "ERROR: failed to save config"
         return 1
     fi
@@ -105,8 +118,8 @@ node_list() {
 
 node_save() {
     _name="$1"
-    if [ -z "$_name" ]; then
-        echo "ERROR: node name required"
+    if ! valid_node_name "$_name"; then
+        echo "ERROR: invalid node name"
         echo "Usage: config.sh <moddir> node save <name>"
         return 1
     fi
@@ -114,14 +127,16 @@ node_save() {
         echo "ERROR: no active config to save"
         return 1
     fi
-    cp "$CONFIG" "$NODES_DIR/${_name}.json"
+    umask 077
+    cp "$CONFIG" "$NODES_DIR/${_name}.json" || return 1
+    chmod 600 "$NODES_DIR/${_name}.json" 2>/dev/null
     echo "Node '$_name' saved successfully"
 }
 
 node_switch() {
     _name="$1"
-    if [ -z "$_name" ]; then
-        echo "ERROR: node name required"
+    if ! valid_node_name "$_name"; then
+        echo "ERROR: invalid node name"
         echo "Usage: config.sh <moddir> node switch <name>"
         return 1
     fi
@@ -132,14 +147,15 @@ node_switch() {
     fi
     cp "$NODES_DIR/${_name}.json" "$CONFIG"
     echo "$_name" > "$ACTIVE_FILE"
+    chmod 600 "$CONFIG" "$ACTIVE_FILE" 2>/dev/null
     echo "Switched to node '$_name'"
     echo "Restart gost to apply changes."
 }
 
 node_delete() {
     _name="$1"
-    if [ -z "$_name" ]; then
-        echo "ERROR: node name required"
+    if ! valid_node_name "$_name"; then
+        echo "ERROR: invalid node name"
         echo "Usage: config.sh <moddir> node delete <name>"
         return 1
     fi

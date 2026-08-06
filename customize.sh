@@ -3,6 +3,7 @@
 # Let Magisk/KernelSU extract the module before sourcing this script.
 # Manual unzip is intentionally avoided because some installers expose ZIPFILE
 # through a descriptor/path that a second unzip process cannot reopen.
+# shellcheck disable=SC2034 # Magisk installer framework consumes this variable.
 SKIPUNZIP=0
 
 # KernelSU may expose MODPATH as a path relative to /data/adb (for example
@@ -103,7 +104,7 @@ ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
 # touching preserved data or finishing the offline installation.
-for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh scripts/test_rule.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64; do
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/stop.sh scripts/restart.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh scripts/test_rule.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
     fi
@@ -156,6 +157,13 @@ if [ ! -f "$MODDIR/gost/config.json" ]; then
         ui_print "- Created default config from template."
     fi
 fi
+
+# Runtime configuration and saved nodes may contain proxy credentials. Keep
+# them private after both fresh installs and upgrades from older releases.
+chmod 700 "$MODDIR/gost" "$MODDIR/gost/nodes" 2>/dev/null
+chmod 600 "$MODDIR/gost/config.json" 2>/dev/null
+[ -f "$MODDIR/gost/active" ] && chmod 600 "$MODDIR/gost/active" 2>/dev/null
+find "$MODDIR/gost/nodes" -type f -name '*.json' -exec chmod 600 {} \; 2>/dev/null
 
 # ---- Optional Gost download with volume keys ----
 GETEVENT=$(command -v getevent 2>/dev/null)
@@ -243,6 +251,7 @@ rm -rf "$PRESERVE_DIR"
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null
 chmod 755 "$MODDIR/scripts/start.sh"
+chmod 755 "$MODDIR/scripts/restart.sh"
 chmod 755 "$MODDIR/scripts/iptables.sh"
 chmod 755 "$MODDIR/scripts/dns_filter.sh"
 chmod 755 "$MODDIR/scripts/stop.sh"
@@ -252,6 +261,7 @@ chmod 755 "$MODDIR/scripts/test_rule.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
 chmod 755 "$MODDIR/scripts/download_gost.sh"
 chmod 755 "$MODDIR/scripts/update_geodata.sh"
+chmod 755 "$MODDIR/scripts/build_dns_filter.sh" 2>/dev/null
 chmod 755 "$MODDIR/webui/server.sh"
 chmod 755 "$MODDIR/webui/cgi-bin/api" 2>/dev/null
 chmod 755 "$MODDIR/post-fs-data.sh"

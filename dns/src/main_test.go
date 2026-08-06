@@ -3,9 +3,28 @@ package main
 import (
 	"encoding/binary"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
+
+func TestValidateModuleConfig(t *testing.T) {
+	path := t.TempDir() + "/config.json"
+	valid := []byte(`{"proxy_type":"redirect","listen_port":1080,"webui_port":8080,"upstream":{"enabled":false},"routing":{"direct_uids":[0,1000]}}`)
+	if err := os.WriteFile(path, valid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateModuleConfig(path); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+	malformed := []byte(`{"proxy_type":"redirect","listen_port":1080,,"webui_port":8080}`)
+	if err := os.WriteFile(path, malformed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateModuleConfig(path); err == nil {
+		t.Fatal("malformed JSON was accepted")
+	}
+}
 
 func makeQuery(name string, qtype uint16) []byte {
 	msg := make([]byte, 12)
@@ -64,6 +83,20 @@ func TestFilteredSuffixBoundary(t *testing.T) {
 		if s.filtered(name) {
 			t.Errorf("did not expect %q to be filtered", name)
 		}
+	}
+}
+
+func TestFilterAllAAAA(t *testing.T) {
+	s := server{domains: []string{"google.com"}, filterAllAAAA: true}
+	if !s.shouldFilterAAAA("unrelated.example") {
+		t.Fatal("global IPv4-only mode did not filter unrelated AAAA query")
+	}
+	s.filterAllAAAA = false
+	if s.shouldFilterAAAA("unrelated.example") {
+		t.Fatal("domain-only mode filtered unrelated AAAA query")
+	}
+	if !s.shouldFilterAAAA("www.google.com") {
+		t.Fatal("domain-only mode did not filter configured suffix")
 	}
 }
 

@@ -3,11 +3,43 @@
 MODDIR=${1:-/data/adb/modules/gost_proxy}
 LOGFILE="$MODDIR/logs/gost.log"
 PIDFILE="/tmp/gost.pid"
+LOCKDIR="/tmp/gost-operation.lock"
 
 mkdir -p "$MODDIR/logs"
 
+acquire_lock() {
+    _wait=0
+    _missing_owner=0
+    while ! mkdir "$LOCKDIR" 2>/dev/null; do
+        if [ -f "$LOCKDIR/pid" ]; then
+            _missing_owner=0
+            _owner=$(cat "$LOCKDIR/pid" 2>/dev/null)
+            case "$_owner" in ''|*[!0-9]*) _owner="" ;; esac
+            [ -n "$_owner" ] && kill -0 "$_owner" 2>/dev/null || rm -rf "$LOCKDIR"
+        else
+            _missing_owner=$((_missing_owner + 1))
+            [ "$_missing_owner" -ge 2 ] && rm -rf "$LOCKDIR"
+        fi
+        _wait=$((_wait + 1))
+        [ "$_wait" -ge 30 ] && return 1
+        sleep 1
+    done
+    printf '%s\n' "$$" > "$LOCKDIR/pid"
+    trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+}
+
+if [ "${GOST_LOCK_HELD:-0}" != "1" ]; then
+    if ! acquire_lock; then
+        echo "ERROR: another gost operation is in progress"
+        exit 1
+    fi
+fi
+
 # Remove traffic interception before stopping gost to avoid breaking networking.
-[ -f "$MODDIR/scripts/iptables.sh" ] && sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1
+if [ -f "$MODDIR/scripts/iptables.sh" ] && ! sh "$MODDIR/scripts/iptables.sh" "$MODDIR" stop >/dev/null 2>&1; then
+    echo "ERROR: failed to remove transparent proxy rules"
+    exit 1
+fi
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"

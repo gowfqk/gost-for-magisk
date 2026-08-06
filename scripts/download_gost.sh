@@ -201,7 +201,6 @@ download_binary() {
     mkdir -p "$TMPDIR"
 
     TARFILE="${TMPDIR}/${ASSET_NAME}"
-    BINARY_OUT="${TMPDIR}/gost"
 
     # GitHub's release API exposes an official sha256 digest for each asset.
     # Mirrors are transport fallbacks only; their content must match GitHub.
@@ -211,8 +210,10 @@ download_binary() {
     EXPECTED_SHA256=$(printf '%s' "$RAW_JSON" | tr -d '[:space:]' | sed 's/,"name":/\
 "name":/g' | grep "^\"name\":\"${ASSET_NAME}\"" | grep -o '"digest":"sha256:[0-9A-Fa-f]*"' | head -1 | sed 's/.*sha256://; s/"$//')
     if [ -z "$EXPECTED_SHA256" ]; then
-        CHECKSUMS_URL=$(selected_url "${GOST_RELEASE_BASE}/${GOST_TAG}/checksums.txt")
-        log "Fetching checksums.txt through selected source"
+        # The checksum is security metadata and must never come from the same
+        # accelerator that transports the executable archive.
+        CHECKSUMS_URL="${GOST_RELEASE_BASE}/${GOST_TAG}/checksums.txt"
+        log "Fetching checksums.txt directly from GitHub"
         CHECKSUMS=$(fetch_text "$CHECKSUMS_URL")
         EXPECTED_SHA256=$(printf '%s\n' "$CHECKSUMS" | awk -v asset="$ASSET_NAME" '$2 == asset || $2 == "*" asset { print $1; exit }')
     fi
@@ -353,10 +354,8 @@ verify_binary() {
         log "Binary verification passed: $VERSION_OUTPUT"
         return 0
     else
-        warn "Binary version check inconclusive: $VERSION_OUTPUT"
-        warn "This is normal if running on a different architecture than the target device"
-        log "Binary file exists and has correct permissions, assuming OK"
-        return 0
+        err "Binary version check failed: $VERSION_OUTPUT"
+        return 1
     fi
 }
 
@@ -425,14 +424,32 @@ main() {
     # Step 4: Download binary
     log "Step 4/5: Downloading binary..."
     DOWNLOAD_OK=0
+    PREVIOUS_BIN="${TARGET_DIR}/.gost.previous.$$"
+    if [ -s "${TARGET_DIR}/gost" ]; then
+        cp "${TARGET_DIR}/gost" "$PREVIOUS_BIN" || exit 1
+        chmod 755 "$PREVIOUS_BIN" 2>/dev/null
+    else
+        rm -f "$PREVIOUS_BIN"
+    fi
     if ! download_binary; then
+        rm -f "$PREVIOUS_BIN"
         exit 1
     fi
     echo ""
 
     # Step 5: Verify
     log "Step 5/5: Verifying installation..."
-    verify_binary
+    if ! verify_binary; then
+        if [ -s "$PREVIOUS_BIN" ]; then
+            mv -f "$PREVIOUS_BIN" "${TARGET_DIR}/gost"
+            chmod 755 "${TARGET_DIR}/gost" 2>/dev/null
+            err "Restored the previous Gost binary after verification failed"
+        else
+            rm -f "${TARGET_DIR}/gost"
+        fi
+        exit 1
+    fi
+    rm -f "$PREVIOUS_BIN"
     echo ""
 
     echo "========================================"

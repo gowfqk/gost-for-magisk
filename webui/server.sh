@@ -48,8 +48,15 @@ if [ "$1" = "--handle" ]; then
         esac
     done
 
-    # Read POST body
+    # Read POST body. Apply the same limit as CGI before attempting dd so an
+    # oversized or incomplete request cannot block the single-connection nc loop.
     BODY=""
+    MAX_BODY_SIZE=65536
+    case "$CONTENT_LENGTH" in ''|*[!0-9]*) CONTENT_LENGTH=0 ;; esac
+    if [ "$CONTENT_LENGTH" -gt "$MAX_BODY_SIZE" ] 2>/dev/null; then
+        printf 'HTTP/1.1 413 Request Entity Too Large\r\nContent-Type: application/json; charset=utf-8\r\nConnection: close\r\n\r\n{"success":false,"message":"Request body too large"}'
+        exit 0
+    fi
     if [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
         BODY=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
     fi

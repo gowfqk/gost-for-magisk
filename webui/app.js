@@ -73,6 +73,7 @@
             direct_rules: "Direct domains / IP / CIDR (one per line)",
             direct_uids: "Direct Android UIDs (comma separated)",
             split_routing_hint: "Domain/IP rules bypass the upstream chain. UID rules bypass transparent interception. TCP only.",
+            ipv6_enable: "Enable IPv6", ipv6_hint: "Disable to filter all AAAA DNS answers and force websites to use IPv4.",
             geodata_auto_split: "GeoData Auto-Split", geodata_enable: "Enable GeoData bypass (China direct)",
             geodata_auto_update: "Auto-update on boot", geodata_update: "Update GeoData Now",
             geodata_hint: "Downloads GeoSite/GeoIP databases, extracts China domains and CIDRs, and uses them as bypass rules. Requires upstream proxy enabled. File-based bypass supports 70k+ rules.",
@@ -150,6 +151,7 @@
             direct_rules: "直连域名 / IP / CIDR（每行一条）",
             direct_uids: "直连 Android UID（逗号分隔）",
             split_routing_hint: "域名/IP 规则会绕过上游链路；UID 规则会绕过透明接管。仅支持 TCP。",
+            ipv6_enable: "启用 IPv6", ipv6_hint: "关闭后过滤所有 AAAA DNS 结果，强制网站使用 IPv4。",
             geodata_auto_split: "GeoData 自动分流", geodata_enable: "启用 GeoData 分流（中国大陆直连）",
             geodata_auto_update: "开机自动更新", geodata_update: "立即更新 GeoData",
             geodata_hint: "下载 GeoSite/GeoIP 数据库，提取中国大陆域名和 CIDR，并作为直连分流规则。需要先启用上游代理。文件规则支持 7 万条以上。",
@@ -314,6 +316,8 @@
         $("proxyType").value = proxyType;
         $("listenAddr").value = config.listen_addr || "0.0.0.0";
         $("listenPort").value = config.listen_port || 1080;
+        var transparent = config.transparent || {};
+        $("ipv6Enabled").checked = transparent.ipv6_enabled === true;
 
         var auth = config.auth || {};
         $("authEnabled").checked = proxyType === "socks5" && !!auth.enabled;
@@ -395,6 +399,7 @@
             sniffing_timeout: "5s",
             sniffing_fallback: true,
             sniffing_dial_original_dst: false,
+            ipv6_enabled: $("ipv6Enabled").checked,
             exclude_lan: true
         });
         config.auth = Object.assign({}, config.auth || {}, {
@@ -698,44 +703,71 @@
             });
     }
 
+    function makeNodeAction(label, className, handler) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-sm " + className;
+        button.textContent = label;
+        button.addEventListener("click", handler);
+        return button;
+    }
+
     function renderNodeList(nodes, active) {
         var container = $("nodeList");
+        container.replaceChildren();
         if (!nodes.length) {
-            container.innerHTML = '<p class="text-muted">' + t("no_nodes") + '</p>';
+            var empty = document.createElement("p");
+            empty.className = "text-muted";
+            empty.textContent = t("no_nodes");
+            container.appendChild(empty);
             return;
         }
-        var html = "";
         nodes.forEach(function (node) {
             var isActive = node.active || node.id === active;
-            var nodeId = node.id || node.name;
-            var displayName = node.display_name || node.name || nodeId;
+            var nodeId = String(node.id || node.name || "");
+            var displayName = String(node.display_name || node.name || nodeId);
             var upInfo = t("direct");
             if (node.upstream && node.upstream.enabled === "true") {
                 upInfo = (node.upstream.type || "http") + "://" + (node.upstream.addr || "?") + ":" + (node.upstream.port || "?");
             }
-            html += '<div class="node-item' + (isActive ? " node-active" : "") + '">';
-            html += '  <div class="node-info">';
-            html += '    <span class="node-name">' + escapeHtml(displayName) + (isActive ? ' <span class="node-badge">' + (currentLang === "zh" ? "使用中" : "ACTIVE") + '</span>' : "") + "</span>";
-            html += '    <span class="node-detail">' + escapeHtml(node.proxy_type || "redirect") + "://:" + (node.listen_port || 1080) + " &rarr; " + escapeHtml(upInfo) + "</span>";
-            html += "  </div>";
-            html += '  <div class="node-actions">';
-            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.renameNode(\'' + escapeHtml(nodeId) + '\',\'' + escapeHtml(displayName) + '\')">' + t("rename") + '</button>';
-            html += '    <button class="btn btn-sm btn-secondary" onclick="window.__app.editNode(\'' + escapeHtml(nodeId) + '\')">' + t("edit_btn") + '</button>';
-            if (!isActive) {
-                html += '    <button class="btn btn-sm btn-primary" onclick="window.__app.switchNode(\'' + escapeHtml(nodeId) + '\')">' + t("switch_btn") + '</button>';
-                html += '    <button class="btn btn-sm btn-danger" onclick="window.__app.deleteNode(\'' + escapeHtml(nodeId) + '\')">' + t("delete_btn") + '</button>';
-            } else {
-                html += '    <span class="text-muted">' + t("in_use") + '</span>';
-            }
-            html += "  </div>";
-            html += "</div>";
-        });
-        container.innerHTML = html;
-    }
 
-    function escapeHtml(str) {
-        if (!str) return "";
-        return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+            var item = document.createElement("div");
+            item.className = "node-item" + (isActive ? " node-active" : "");
+            var info = document.createElement("div");
+            info.className = "node-info";
+            var name = document.createElement("span");
+            name.className = "node-name";
+            name.textContent = displayName;
+            if (isActive) {
+                var badge = document.createElement("span");
+                badge.className = "node-badge";
+                badge.textContent = currentLang === "zh" ? "使用中" : "ACTIVE";
+                name.appendChild(document.createTextNode(" "));
+                name.appendChild(badge);
+            }
+            var detail = document.createElement("span");
+            detail.className = "node-detail";
+            detail.textContent = (node.proxy_type || "redirect") + "://:" + (node.listen_port || 1080) + " → " + upInfo;
+            info.appendChild(name);
+            info.appendChild(detail);
+
+            var actions = document.createElement("div");
+            actions.className = "node-actions";
+            actions.appendChild(makeNodeAction(t("rename"), "btn-secondary", function () { renameNode(nodeId, displayName); }));
+            actions.appendChild(makeNodeAction(t("edit_btn"), "btn-secondary", function () { editNode(nodeId); }));
+            if (!isActive) {
+                actions.appendChild(makeNodeAction(t("switch_btn"), "btn-primary", function () { switchNode(nodeId); }));
+                actions.appendChild(makeNodeAction(t("delete_btn"), "btn-danger", function () { deleteNode(nodeId); }));
+            } else {
+                var inUse = document.createElement("span");
+                inUse.className = "text-muted";
+                inUse.textContent = t("in_use");
+                actions.appendChild(inUse);
+            }
+            item.appendChild(info);
+            item.appendChild(actions);
+            container.appendChild(item);
+        });
     }
 
     function saveNode() {

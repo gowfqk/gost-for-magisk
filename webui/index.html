@@ -137,6 +137,18 @@
                             <label class="form-label" data-i18n="listen_port">Listen Port</label>
                             <input type="number" class="form-input" id="listenPort" value="1080" min="1" max="65535">
                         </div>
+                        <div class="form-group">
+                            <label class="toggle-row">
+                                <span>
+                                    <strong data-i18n="ipv6_enable">Enable IPv6</strong>
+                                    <small class="text-muted" data-i18n="ipv6_hint">Disable to filter all AAAA DNS answers and force websites to use IPv4.</small>
+                                </span>
+                                <span class="toggle">
+                                    <input type="checkbox" id="ipv6Enabled">
+                                    <span class="toggle-slider"></span>
+                                </span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 

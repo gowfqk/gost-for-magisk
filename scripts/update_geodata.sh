@@ -5,7 +5,6 @@ MODDIR=${1:-/data/adb/modules/gost_proxy}
 DATA_DIR="$MODDIR/gost/geodata"
 TOOLS_DIR="$MODDIR/gost/tools"
 TMP_DIR="$DATA_DIR/.update.$$"
-STATUS="$DATA_DIR/status.json"
 
 mkdir -p "$DATA_DIR" "$TOOLS_DIR" || exit 1
 rm -rf "$TMP_DIR"

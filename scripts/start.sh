@@ -5,8 +5,38 @@ LOGFILE="$MODDIR/logs/gost.log"
 PIDFILE="/tmp/gost.pid"
 CONFIG="$MODDIR/gost/config.json"
 GOST_BIN="$MODDIR/gost/gost"
+LOCKDIR="/tmp/gost-operation.lock"
 
 mkdir -p "$MODDIR/logs"
+
+acquire_lock() {
+    _wait=0
+    _missing_owner=0
+    while ! mkdir "$LOCKDIR" 2>/dev/null; do
+        if [ -f "$LOCKDIR/pid" ]; then
+            _missing_owner=0
+            _owner=$(cat "$LOCKDIR/pid" 2>/dev/null)
+            case "$_owner" in ''|*[!0-9]*) _owner="" ;; esac
+            [ -n "$_owner" ] && kill -0 "$_owner" 2>/dev/null || rm -rf "$LOCKDIR"
+        else
+            _missing_owner=$((_missing_owner + 1))
+            [ "$_missing_owner" -ge 2 ] && rm -rf "$LOCKDIR"
+        fi
+        _wait=$((_wait + 1))
+        [ "$_wait" -ge 30 ] && return 1
+        sleep 1
+    done
+    printf '%s\n' "$$" > "$LOCKDIR/pid"
+    trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+}
+
+pid_is_gost() {
+    _pid="$1"
+    case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_pid" 2>/dev/null || return 1
+    _cmd=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
+    printf '%s' "$_cmd" | grep -Fq "$GOST_BIN"
+}
 
 # Keep GOST diagnostics useful without allowing an always-on proxy to consume
 # unlimited module storage. Copy-truncate preserves the running process file
@@ -39,9 +69,17 @@ log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
 }
 
+if [ "${GOST_LOCK_HELD:-0}" != "1" ]; then
+    if ! acquire_lock; then
+        log_msg "ERROR: timed out waiting for lifecycle lock"
+        echo "ERROR: another gost operation is in progress"
+        exit 1
+    fi
+fi
+
 if [ -f "$PIDFILE" ]; then
     OLD_PID=$(cat "$PIDFILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
+    if pid_is_gost "$OLD_PID"; then
         log_msg "gost is already running (PID: $OLD_PID)"
         echo "gost is already running (PID: $OLD_PID)"
         exit 0
@@ -153,11 +191,13 @@ case "$LISTEN_PORT" in ''|*[!0-9]*) LISTEN_PORT="1080" ;; esac
 [ "$LISTEN_PORT" -ge 1 ] 2>/dev/null && [ "$LISTEN_PORT" -le 65535 ] 2>/dev/null || LISTEN_PORT="1080"
 DNS_UPSTREAMS=$(jval dns_upstreams)
 [ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5,119.29.29.29"
+IPV6_ENABLED=$(jsection_val transparent ipv6_enabled)
+[ "$IPV6_ENABLED" = "true" ] && IPV6_ENABLED=true || IPV6_ENABLED=false
 # REDIRECT uses a separate IPv6 listener. Binding only to 0.0.0.0 cannot accept
 # connections redirected to ::1, while sharing one port is not portable across
 # Android kernels because IPV6_V6ONLY behavior varies.
 IPV6_LISTEN_PORT=""
-if [ "$PROXY_TYPE" = "redirect" ]; then
+if [ "$PROXY_TYPE" = "redirect" ] && [ "$IPV6_ENABLED" = "true" ]; then
     if [ "$LISTEN_PORT" -lt 65535 ] 2>/dev/null; then
         IPV6_LISTEN_PORT=$((LISTEN_PORT + 1))
     else
@@ -165,7 +205,7 @@ if [ "$PROXY_TYPE" = "redirect" ]; then
     fi
 fi
 
-log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT${IPV6_LISTEN_PORT:+ ipv6_port=$IPV6_LISTEN_PORT}"
+log_msg "Config: type=$PROXY_TYPE addr=$LISTEN_ADDR port=$LISTEN_PORT ipv6=$IPV6_ENABLED${IPV6_LISTEN_PORT:+ ipv6_port=$IPV6_LISTEN_PORT}"
 
 urlencode() {
     printf '%s' "$1" | od -An -tx1 | tr -d ' \n' | awk '
@@ -250,7 +290,7 @@ if [ "$UPSTREAM_ENABLED" = "true" ]; then
             UP_AUTH="$(urlencode "$UP_USER"):$(urlencode "$UP_PASS")@"
         fi
         UP_SCHEME="$UP_TYPE"
-        case "$UP_TYPE" in *+ws*|*+wss*) ;; *)
+        case "$UP_TYPE" in *+ws|*+wss) ;; *)
             if [ -n "$UP_WS_PATH" ]; then UP_SCHEME="${UP_SCHEME}+ws"; fi ;;
         esac
         FORWARD_URL="${UP_SCHEME}://${UP_AUTH}${UP_ADDR}:${UP_PORT}"
@@ -280,13 +320,11 @@ fi
 
 # ---- Parse geodata and routing config ----
 GEODATA_ENABLED=$(jsection_val geodata enabled)
-GEODATA_AUTO_UPDATE=$(jsection_val geodata auto_update)
 GEODATA_DIR="$MODDIR/gost/geodata"
 GEODATA_RULES="$GEODATA_DIR/direct-rules.txt"
 
 ROUTING_ENABLED=$(jsection_val routing enabled)
 ROUTING_BYPASS=$(jsection_val routing bypass)
-ROUTING_DIRECT_UIDS=$(jsection_val routing direct_uids)
 
 MULTI_LISTEN=$(jsection_val advanced multi_listen)
 LOG_LEVEL=$(jsection_val advanced log_level)
@@ -435,7 +473,7 @@ generate_runtime_config() {
         _services_json="${_services_json}$_svc"
     }
     _add_service "$LISTEN_PORT"
-    if [ "$PROXY_TYPE" = "redirect" ]; then
+    if [ "$PROXY_TYPE" = "redirect" ] && [ "$IPV6_ENABLED" = "true" ]; then
         # ip6tables REDIRECT targets this dedicated IPv6 listener.
         _saved_listen_addr="$_esc_listen_addr"
         _esc_listen_addr="[::]"
@@ -490,7 +528,7 @@ if [ "$USE_CONFIG" = "false" ]; then
     fi
 
     set -- -L "$LISTEN_URL"
-    if [ "$PROXY_TYPE" = "redirect" ]; then
+    if [ "$PROXY_TYPE" = "redirect" ] && [ "$IPV6_ENABLED" = "true" ]; then
         set -- "$@" -L "red://[::]:${IPV6_LISTEN_PORT}${QUERY}"
     fi
     OLD_IFS=$IFS
@@ -528,11 +566,13 @@ log_msg "Starting gost proxy..."
 if [ "$USE_CONFIG" = "true" ]; then
     log_msg "Mode: config file (geodata bypass enabled)"
     RUNTIME_CONFIG="$MODDIR/gost/runtime.json"
+    umask 077
     if ! generate_runtime_config "$RUNTIME_CONFIG"; then
         log_msg "ERROR: failed to generate runtime config"
         echo "ERROR: failed to generate runtime config"
         exit 1
     fi
+    chmod 600 "$RUNTIME_CONFIG" 2>/dev/null
     cd "$MODDIR/gost" || {
         log_msg "ERROR: failed to enter $MODDIR/gost"
         echo "ERROR: failed to enter gost directory"
