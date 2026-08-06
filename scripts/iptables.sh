@@ -277,37 +277,13 @@ else
     DNS_FILTER_ENABLED=false
     if sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" start "$DNS_PORT"; then
         if "$IPT" -t nat -N "$DNS_CHAIN" 2>/dev/null; then
-            # Android commonly delegates app lookups to netd, whose external DNS
-            # packets are root-owned. Excluding UID 0 would therefore bypass the
-            # AAAA filter entirely. Exclude only the filter's possible upstream
-            # resolver destinations so its own queries cannot loop.
+            # Android commonly delegates app lookups to root-owned netd, so UID
+            # 0 must still enter the filter. The filter itself runs as shell UID
+            # 2000; exclude only that UID to prevent its upstream DNS queries
+            # from looping back into the local listener. Destination-based
+            # exclusions are unsafe because netd also queries those same servers.
             DNS_EXCLUDES_READY=true
-            DNS_EXCLUDE_IPS=""
-            CONFIGURED_DNS=$(jval dns_upstreams)
-            if [ -n "$CONFIGURED_DNS" ]; then
-                OLD_IFS=$IFS
-                IFS=','
-                for DNS_ITEM in $CONFIGURED_DNS; do
-                    DNS_ITEM=$(printf '%s' "$DNS_ITEM" | tr -d '[:space:]')
-                    DNS_PROP_IP=${DNS_ITEM%:*}
-                    case "$DNS_PROP_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
-                    case " $DNS_EXCLUDE_IPS " in *" $DNS_PROP_IP "*) ;; *) DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS $DNS_PROP_IP" ;; esac
-                done
-                IFS=$OLD_IFS
-            else
-                for DNS_PROP in net.dns1 net.dns2 net.dns3 net.dns4; do
-                    DNS_PROP_IP=$(getprop "$DNS_PROP" 2>/dev/null)
-                    case "$DNS_PROP_IP" in ''|*:*|*[!0-9.]*) continue ;; esac
-                    case " $DNS_EXCLUDE_IPS " in *" $DNS_PROP_IP "*) ;; *) DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS $DNS_PROP_IP" ;; esac
-                done
-                DNS_EXCLUDE_IPS="$DNS_EXCLUDE_IPS 223.5.5.5 119.29.29.29"
-            fi
-            for DNS_UPSTREAM_IP in $DNS_EXCLUDE_IPS; do
-                "$IPT" -t nat -A "$DNS_CHAIN" -d "$DNS_UPSTREAM_IP/32" -j RETURN 2>/dev/null || {
-                    DNS_EXCLUDES_READY=false
-                    break
-                }
-            done
+            "$IPT" -t nat -A "$DNS_CHAIN" -m owner --uid-owner 2000 -j RETURN 2>/dev/null || DNS_EXCLUDES_READY=false
             if [ "$DNS_EXCLUDES_READY" = "true" ] && [ "$ROUTING_ENABLED" = "true" ] && [ -n "$DIRECT_UIDS" ]; then
                 OLD_IFS=$IFS
                 IFS=','
@@ -336,12 +312,14 @@ else
     if [ "$DNS_FILTER_ENABLED" = "true" ]; then
         log_msg "IPv4-only DNS compatibility enabled for Google domains on port $DNS_PORT"
     else
+        # DNS filtering is an IPv4 fallback enhancement, not a prerequisite for
+        # the IPv4 transparent proxy. Some kernels reject owner matching in nat
+        # or do not allow the helper to bind as shell UID 2000. Do not tear down
+        # the working IPv4 REDIRECT chain in that case.
         cleanup_chain "$IPT" nat OUTPUT udp "$DNS_CHAIN"
         cleanup_chain "$IPT" nat OUTPUT tcp "$DNS_CHAIN"
         sh "$MODDIR/scripts/dns_filter.sh" "$MODDIR" stop >/dev/null 2>&1
-        log_msg "ERROR: failed to enable IPv4-only DNS compatibility"
-        cleanup_rules
-        exit 1
+        log_msg "WARNING: IPv4-only DNS compatibility unavailable; IPv4 TCP proxy remains enabled"
     fi
 fi
 

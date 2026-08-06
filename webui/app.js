@@ -81,6 +81,9 @@
             geodata_updating_hint: "Updating... please wait", geodata_last_update: "Last update: {value}",
             geodata_rules: "Rules: {rules} ({domains} domains, {cidrs} CIDRs)",
             geodata_not_downloaded: "Not downloaded", geodata_status_load_failed: "Failed to load status",
+            rule_test_target: "Rule test target", rule_test_placeholder: "example.com or 203.0.113.8", test_rule: "Test Rule",
+            rule_test_running: "Testing saved rules...", rule_test_empty: "Enter a domain or IPv4 address",
+            rule_match_direct: "DIRECT", rule_match_proxy: "PROXY", rule_source: "Source: {value}", rule_matched: "Matched rule: {value}",
             pass: "PASS", fail: "FAIL", test_port: "Port: {value}", test_elapsed: "Elapsed: {value}s", test_url: "URL: {value}",
             api_request_failed: "Request failed", rename: "Rename", rename_prompt: "Enter new node name", rename_failed: "Rename failed",
             lang_btn: "中"
@@ -155,6 +158,9 @@
             geodata_updating_hint: "正在更新，请稍候…", geodata_last_update: "上次更新：{value}",
             geodata_rules: "规则：{rules}（{domains} 条域名，{cidrs} 条 CIDR）",
             geodata_not_downloaded: "尚未下载", geodata_status_load_failed: "加载状态失败",
+            rule_test_target: "规则测试目标", rule_test_placeholder: "example.com 或 203.0.113.8", test_rule: "测试规则",
+            rule_test_running: "正在测试已保存规则……", rule_test_empty: "请输入域名或 IPv4 地址",
+            rule_match_direct: "直连", rule_match_proxy: "上游代理", rule_source: "规则来源：{value}", rule_matched: "命中规则：{value}",
             pass: "通过", fail: "失败", test_port: "端口：{value}", test_elapsed: "耗时：{value} 秒", test_url: "网址：{value}",
             api_request_failed: "请求失败", rename: "重命名", rename_prompt: "输入新的节点名称", rename_failed: "重命名失败",
             lang_btn: "EN"
@@ -863,6 +869,38 @@
             .then(function () { button.disabled = false; });
     }
 
+    function testRule() {
+        var target = $("ruleTestTarget").value.trim();
+        var button = $("btnTestRule");
+        var result = $("ruleTestResult");
+        result.style.display = "";
+        if (!target) {
+            result.textContent = t("rule_test_empty");
+            result.className = "command-preview test-failure";
+            return;
+        }
+        button.disabled = true;
+        result.textContent = t("rule_test_running");
+        result.className = "command-preview";
+        fetchJSON("/cgi-bin/api?endpoint=rule/test", { method: "POST", body: { target: target } })
+            .then(function (res) {
+                if (!res.success) throw new Error(res.message || t("api_request_failed"));
+                var lines = [
+                    res.matched ? t("rule_match_direct") : t("rule_match_proxy"),
+                    res.message || "",
+                    res.source && res.source !== "none" ? t("rule_source", {value: res.source}) : "",
+                    res.rule ? t("rule_matched", {value: res.rule}) : ""
+                ].filter(Boolean);
+                result.textContent = lines.join("\n");
+                result.className = "command-preview " + (res.matched ? "test-success" : "");
+            })
+            .catch(function (err) {
+                result.textContent = (err && err.message) || t("api_request_failed");
+                result.className = "command-preview test-failure";
+            })
+            .then(function () { button.disabled = false; });
+    }
+
     function gostAction(action) {
         fetchJSON("/cgi-bin/api?endpoint=" + action, { method: "POST" })
             .then(function (res) {
@@ -984,6 +1022,10 @@
             gostAction("restart");
         });
         $("btnTestProxy").addEventListener("click", testProxy);
+        $("btnTestRule").addEventListener("click", testRule);
+        $("ruleTestTarget").addEventListener("keydown", function (event) {
+            if (event.key === "Enter") testRule();
+        });
         $("btnDownloadGost").addEventListener("click", downloadGost);
 
         $("proxyType").addEventListener("change", updateProxyTypeFields);

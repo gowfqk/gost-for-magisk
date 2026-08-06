@@ -37,8 +37,9 @@ ui_print "========================================"
 ui_print ""
 
 # ---- Preserve existing config before extraction ----
-# Gost itself is intentionally not preserved: every installation downloads a
-# fresh, checksum-verified binary from the source selected with the volume keys.
+# Preserve a known-working Gost binary during upgrades. If the user skips the
+# optional download, the existing proxy must remain usable instead of silently
+# leaving the module without an executable.
 PRESERVE_DIR="/tmp/gost_preserve"
 PERSIST_DIR="/data/adb/gost_proxy"
 rm -rf "$PRESERVE_DIR"
@@ -68,7 +69,14 @@ if [ -n "$OLD_MODDIR" ] && [ -f "$OLD_MODDIR/gost/config.json" ]; then
         cp "$OLD_MODDIR/gost/tools/geoview" "$PRESERVE_DIR/geoview"
     fi
 
-    ui_print "- Config, nodes, and geodata preserved."
+    # Preserve the installed Gost binary as an offline-safe fallback.
+    if [ -s "$OLD_MODDIR/gost/gost" ]; then
+        cp "$OLD_MODDIR/gost/gost" "$PRESERVE_DIR/gost"
+    elif [ -s "$PERSIST_DIR/gost" ]; then
+        cp "$PERSIST_DIR/gost" "$PRESERVE_DIR/gost"
+    fi
+
+    ui_print "- Config, nodes, geodata, and available Gost binary preserved."
 else
     ui_print "- No existing config found."
 fi
@@ -95,7 +103,7 @@ ui_print "- Module files extracted by installer."
 
 # Verify the standard installer actually populated the module directory before
 # touching preserved data or finishing the offline installation.
-for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64; do
+for REQUIRED_FILE in module.prop service.sh scripts/start.sh scripts/dns_filter.sh scripts/download_gost.sh scripts/update_geodata.sh scripts/test_rule.sh webui/cgi-bin/api gost/nodes/default.json.example dns/ipv4-only-domains.txt dns/bin/dns-filter-arm64; do
     if [ ! -f "$MODDIR/$REQUIRED_FILE" ]; then
         abort "ERROR: Missing module file: $REQUIRED_FILE"
     fi
@@ -131,8 +139,12 @@ if [ -f "$PRESERVE_DIR/config.json" ]; then
     ui_print "- Config restored successfully."
 fi
 
-# Clean up
-rm -rf "$PRESERVE_DIR"
+# Restore the preserved Gost binary before offering an optional fresh download.
+if [ -s "$PRESERVE_DIR/gost" ]; then
+    cp "$PRESERVE_DIR/gost" "$MODDIR/gost/gost"
+    chmod 755 "$MODDIR/gost/gost"
+    ui_print "- Restored existing Gost binary as fallback."
+fi
 
 # ---- Ensure nodes directory exists ----
 mkdir -p "$MODDIR/gost/nodes"
@@ -178,10 +190,6 @@ case "$KEY_RESULT" in
         ;;
 esac
 
-# Never silently restore an old persistent binary when download was skipped.
-# The WebUI remains available and can download Gost later.
-rm -f "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
-
 if [ "$DOWNLOAD_GOST" = "true" ]; then
     ui_print ""
     ui_print "Choose Gost download source:"
@@ -218,8 +226,20 @@ if [ "$DOWNLOAD_GOST" = "true" ]; then
     fi
     ui_print "- Fresh Gost binary downloaded and verified: $GOST_VERSION_OUTPUT"
 else
-    ui_print "- Gost download skipped. Open WebUI after installation to download it."
+    if [ -s "$MODDIR/gost/gost" ]; then
+        ui_print "- Gost download skipped; keeping the existing binary."
+    else
+        ui_print "- Gost download skipped. Open WebUI after installation to download it."
+    fi
 fi
+
+# Heal persistent storage from either a restored or freshly downloaded binary.
+if [ -s "$MODDIR/gost/gost" ]; then
+    mkdir -p "$PERSIST_DIR"
+    cp "$MODDIR/gost/gost" "$PERSIST_DIR/gost" 2>/dev/null
+    chmod 755 "$PERSIST_DIR/gost" 2>/dev/null
+fi
+rm -rf "$PRESERVE_DIR"
 
 chmod 755 "$MODDIR/gost/gost" 2>/dev/null
 chmod 755 "$MODDIR/scripts/start.sh"
@@ -228,6 +248,7 @@ chmod 755 "$MODDIR/scripts/dns_filter.sh"
 chmod 755 "$MODDIR/scripts/stop.sh"
 chmod 755 "$MODDIR/scripts/status.sh"
 chmod 755 "$MODDIR/scripts/test_proxy.sh"
+chmod 755 "$MODDIR/scripts/test_rule.sh"
 chmod 755 "$MODDIR/scripts/config.sh"
 chmod 755 "$MODDIR/scripts/download_gost.sh"
 chmod 755 "$MODDIR/scripts/update_geodata.sh"

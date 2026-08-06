@@ -9,6 +9,7 @@ DNS_DOMAINS="$DNS_DIR/ipv4-only-domains.txt"
 DNS_LOG="$MODDIR/logs/dns-filter.log"
 DNS_PIDFILE="/tmp/gost-dns-filter.pid"
 DNS_UPSTREAM_FILE="/tmp/gost-dns-upstreams.txt"
+DNS_FILTER_UID=2000
 
 log_msg() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] dns-filter: $1" >> "$DNS_LOG"
@@ -86,7 +87,12 @@ fi
 DNS_UPSTREAMS=$(awk '!seen[$0]++ { if (out != "") out=out ","; out=out $0 } END { print out }' "$DNS_UPSTREAM_FILE")
 rm -f "$DNS_UPSTREAM_FILE"
 [ -n "$DNS_UPSTREAMS" ] || DNS_UPSTREAMS="223.5.5.5:53,119.29.29.29:53"
-"$DNS_BIN" -listen "127.0.0.1:$DNS_PORT" -upstream "$DNS_UPSTREAMS" -domains "$DNS_DOMAINS" -timeout 2s >> "$DNS_LOG" 2>&1 &
+DNS_CMD="$DNS_BIN -listen 127.0.0.1:$DNS_PORT -upstream $DNS_UPSTREAMS -domains $DNS_DOMAINS -timeout 2s"
+if ! command -v su >/dev/null 2>&1; then
+    log_msg "ERROR: su is required to run the DNS filter without a redirect loop"
+    exit 1
+fi
+su "$DNS_FILTER_UID" -c "$DNS_CMD" >> "$DNS_LOG" 2>&1 &
 DNS_PID=$!
 sleep 1
 if ! kill -0 "$DNS_PID" 2>/dev/null; then

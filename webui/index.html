@@ -364,6 +364,14 @@
                             <input type="text" class="form-input" id="routingDirectUids" placeholder="1000,10123">
                         </div>
                         <p class="text-muted" data-i18n="split_routing_hint">Domain/IP rules bypass the upstream chain. UID rules bypass transparent interception. TCP only.</p>
+                        <div class="form-group" style="margin-top:16px">
+                            <label class="form-label" data-i18n="rule_test_target">Rule test target</label>
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <input type="text" class="form-input" id="ruleTestTarget" data-i18n-ph="rule_test_placeholder" placeholder="example.com or 203.0.113.8">
+                                <button class="btn btn-secondary" id="btnTestRule" data-i18n="test_rule">Test Rule</button>
+                            </div>
+                        </div>
+                        <pre class="command-preview" id="ruleTestResult" style="display:none;white-space:pre-wrap;font-size:12px">-</pre>
                     </div>
                 </div>
                 <div class="card">
